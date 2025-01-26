@@ -288,7 +288,7 @@ var
   Buzzpirat_Pulls: integer = 0;
   Buzzpirat_Power: integer = 0;
   Arduino_COMPort: string;
-  Arduino_BaudRate: integer = 1000000;
+  Arduino_BaudRate: integer = 921600;
   Buzzpirat_COMPort: string;
 implementation
 
