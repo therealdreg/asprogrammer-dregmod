@@ -10,7 +10,8 @@ uses
 type
 
 //List of devices
-THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H, CHW_BUZZPIRAT);
+THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H, CHW_BUZZPIRAT,
+                 CHW_BUSPIRATE5);
 
 //Base class for hardware
 TBaseHardware = class
@@ -29,7 +30,6 @@ public
   procedure SPIDeinit; virtual; abstract;
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; virtual; abstract;
   function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer; virtual; abstract;
-  function SPIWriteRead(CS: byte; WBufferLen: integer; WBuffer: array of byte;RBufferLen: integer; var RBuffer: array of byte): integer; virtual; abstract;
 
   //I2C
   procedure I2CInit; virtual; abstract;

@@ -5,7 +5,7 @@ unit spi95;
 interface
 
 uses
-  Classes, SysUtils, spi25, BaseHW;
+  Classes, SysUtils, spi25;
 
 function UsbAsp95_Read(ChipSize: integer; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
 function UsbAsp95_Write(ChipSize: integer; Addr: longword; buffer: array of byte; bufflen: integer): integer;
@@ -66,7 +66,8 @@ begin
     len := 4;
   end;
 
-  result := SPIReadWrite(1, 0, bufflen, buffer, len, buff);
+  SPIWrite(0, len, buff);
+  result := SPIRead(1, bufflen, buffer);
 end;
 
 function UsbAsp95_Write(ChipSize: integer; Addr: longword; buffer: array of byte; bufflen: integer): integer;
@@ -150,8 +151,8 @@ end;
 function UsbAsp95_ReadSR(var sreg: byte): integer;
 begin
   sreg := $05;
-
-  result := SPIReadWrite(1, 0, 1, sreg, 1, sreg);
+  SPIWrite(0, 1, sreg);
+  result := SPIRead(1, 1, sreg);
 end;
 
 end.

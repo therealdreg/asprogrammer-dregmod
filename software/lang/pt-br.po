@@ -432,3 +432,331 @@ msgstr "Salvar como"
 #: tscripteditform.menuitemsection.caption
 msgid "Секция ="
 msgstr "Seção"
+
+#: tmainform.menuspi.caption
+msgid "SPI"
+msgstr ""
+
+#: tmainform.menuch347spiclock.caption
+msgid "Частота"
+msgstr ""
+
+#: tmainform.menuarduinospiclock.caption
+msgid "Частота"
+msgstr ""
+
+#: tmainform.menu32khz.caption
+msgid "32 kHz (soft)"
+msgstr ""
+
+#: tmainform.menuavrispspiclock.caption
+msgid "Частота"
+msgstr ""
+
+#: tmainform.menuft232spiclock.caption
+msgid "Частота"
+msgstr ""
+
+#: tmainform.menuskipff.caption
+msgid "Не писать FF"
+msgstr ""
+
+#: tmainform.menusendab.caption
+msgid "Выводить чип из сна"
+msgstr ""
+
+#: tmainform.menuitembenchmark.caption
+msgid "Benchmark"
+msgstr ""
+
+#: tmainform.menumicrowire.caption
+msgid "Microwire (soft)"
+msgstr ""
+
+#: tmainform.menuarduinocomport.caption
+msgid "Arduino COMPort:"
+msgstr ""
+
+#: tmainform.menuhwbuzzpirat.caption
+msgid "Buzzpirat / BusPirateV3"
+msgstr ""
+
+#: tmainform.menuhwbuspirate5.caption
+msgid "BusPirateV5+"
+msgstr ""
+
+#: tmainform.menuhwusbasp.caption
+msgid "UsbAsp"
+msgstr ""
+
+#: tmainform.menuhwch341a.caption
+msgid "CH341a"
+msgstr ""
+
+#: tmainform.menuhwch347.caption
+msgid "CH347T"
+msgstr ""
+
+#: tmainform.menuhwavrisp.caption
+msgid "AVRISP-MKII"
+msgstr ""
+
+#: tmainform.menuhwarduino.caption
+msgid "Arduino"
+msgstr ""
+
+#: tmainform.menuhwft232h.caption
+msgid "FT232H"
+msgstr ""
+
+#: tmainform.langmenuitem.caption
+msgid "Language"
+msgstr ""
+
+#: tmainform.menubuzzpirat.caption
+msgid "Buzzpirat / BusPirateV3"
+msgstr ""
+
+#: tmainform.menubuzzpiratcomport.caption
+msgid "COM port: none selected"
+msgstr ""
+
+#: tmainform.menubuzzpiratserialspeed.caption
+msgid "Serial link speed"
+msgstr ""
+
+#: tmainform.menubuzzpiratserial115200.caption
+msgid "115200 baud (default, always works)"
+msgstr ""
+
+#: tmainform.menubuzzpiratserial230400.caption
+msgid "230400 baud (2.1% clock error, avoid)"
+msgstr ""
+
+#: tmainform.menubuzzpiratserial250000.caption
+msgid "250000 baud (exact)"
+msgstr ""
+
+#: tmainform.menubuzzpiratserial1m.caption
+msgid "1 Mbaud (exact)"
+msgstr ""
+
+#: tmainform.menubuzzpiratserial2m.caption
+msgid "2 Mbaud (exact, fastest)"
+msgstr ""
+
+#: tmainform.menubuzzpiratpullups.caption
+msgid "Pull UPs ON"
+msgstr ""
+
+#: tmainform.menubuzzpiratpower.caption
+msgid "Power ON"
+msgstr ""
+
+#: tmainform.menubuzzpiratverbose.caption
+msgid "Verbose log"
+msgstr ""
+
+#: tmainform.menubuzzpiratreseteach.caption
+msgid "Reset device on every operation (slow)"
+msgstr ""
+
+#: tmainform.menubuzzpiratsubi2c.caption
+msgid "I2C"
+msgstr ""
+
+#: tmainform.menubuzzpirati2cclock.caption
+msgid "Clock"
+msgstr ""
+
+#: tmainform.menubuzzpirati2c400khz.caption
+msgid "400 KHz (not recommended)"
+msgstr ""
+
+#: tmainform.menubuzzpirati2cscan.caption
+msgid "Scan the I2C bus..."
+msgstr ""
+
+#: tmainform.menubuzzpiratsubspi.caption
+msgid "SPI"
+msgstr ""
+
+#: tmainform.menubuzzpiratspinormal.caption
+msgid "Output Normal (H=3.3V)"
+msgstr ""
+
+#: tmainform.menubuzzpiratspihiz.caption
+msgid "Output Open drain (H=Hi-Z) (buzzif check)"
+msgstr ""
+
+#: tmainform.menubuzzpiratspiclock.caption
+msgid "Clock"
+msgstr ""
+
+#: tmainform.menubuzzpiratspi30khz.caption
+msgid "30 KHz (1v8)"
+msgstr ""
+
+#: tmainform.menubuzzpiratdisconnect.caption
+msgid "Disconnect and reset device"
+msgstr ""
+
+#: tmainform.debugconsolemenuitem.caption
+msgid "Device info / voltages"
+msgstr ""
+
+#: tmainform.menuhexeditor.caption
+msgid "Hexeditor"
+msgstr ""
+
+#: tmainform.menuhexeditorrandom.caption
+msgid "Fill with random data"
+msgstr ""
+
+#: tmainform.menubp5.caption
+msgid "BusPirateV5+"
+msgstr ""
+
+#: tmainform.menubp5comport.caption
+msgid "COM port: none selected"
+msgstr ""
+
+#: tmainform.menubp5power.caption
+msgid "Power ON"
+msgstr ""
+
+#: tmainform.menubp5voltage.caption
+msgid "Voltage"
+msgstr ""
+
+#: tmainform.menubp5current.caption
+msgid "Current limit"
+msgstr ""
+
+#: tmainform.menubp5curunlimited.caption
+msgid "unlimited"
+msgstr ""
+
+#: tmainform.menubp5pullups.caption
+msgid "Pull UPs ON"
+msgstr ""
+
+#: tmainform.menubp5verbose.caption
+msgid "Verbose log"
+msgstr ""
+
+#: tmainform.menubp5reseteach.caption
+msgid "Reconnect on every operation (slow)"
+msgstr ""
+
+#: tmainform.menubp5subi2c.caption
+msgid "I2C"
+msgstr ""
+
+#: tmainform.menubp5i2cclock.caption
+msgid "Clock"
+msgstr ""
+
+#: tmainform.menubp5i2cscan.caption
+msgid "Scan the I2C bus..."
+msgstr ""
+
+#: tmainform.menubp5subspi.caption
+msgid "SPI"
+msgstr ""
+
+#: tmainform.menubp5spiclock.caption
+msgid "Clock"
+msgstr ""
+
+#: tmainform.menubp5disconnect.caption
+msgid "Disconnect (HiZ, supply off)"
+msgstr ""
+
+#: tmainform.menubp5info.caption
+msgid "Device info / voltages"
+msgstr ""
+
+#: tmainform.menubp5help.caption
+msgid "Bus Pirate v5+ documentation"
+msgstr ""
+
+#: tmainform.creditsmenuitem.caption
+msgid "Credits"
+msgstr ""
+
+#: tmainform.bzhelpmenuitem.caption
+msgid "Help"
+msgstr ""
+
+#: tmainform.allowinsertitem.caption
+msgid "Разрешить режим вставки"
+msgstr ""
+
+#: tmainform.menuhexeditorpopuprandom.caption
+msgid "Fill with random data"
+msgstr ""
+
+#: dregstr.str_dm_no_serial_ports
+msgid "no serial ports found - plug the device in"
+msgstr ""
+
+#: dregstr.str_dm_comport_none
+msgid "COM port: none selected"
+msgstr ""
+
+#: dregstr.str_dm_comport_prefix
+msgid "COM port: "
+msgstr ""
+
+#: dregstr.str_dm_not_this_one
+msgid " - not this one"
+msgstr ""
+
+#: dregstr.str_dm_i2c_scan_title
+msgid "I2C bus scan"
+msgstr ""
+
+#: dregstr.str_dm_i2c_scan_no_run
+msgid "The scan could not run."
+msgstr ""
+
+#: dregstr.str_dm_i2c_scan_on
+msgid "I2C bus scan on "
+msgstr ""
+
+#: dregstr.str_dm_i2c_scan_count
+msgid "%d device(s) answered."
+msgstr ""
+
+#: dregstr.str_dm_i2c_use_address
+msgid "Use this address"
+msgstr ""
+
+#: dregstr.str_dm_i2c_addr_stored
+msgid "Address stored. It takes effect once an I2C chip is selected - that is when the address toggles appear."
+msgstr ""
+
+#: dregstr.str_dm_fill_title
+msgid "Fill with random data"
+msgstr ""
+
+#: dregstr.str_dm_fill_no_size
+msgid "Pick a chip first, or read one / open a file, so there is a size to fill."
+msgstr ""
+
+#: dregstr.str_dm_btn_close
+msgid "Close"
+msgstr ""
+
+#: dregstr.str_dm_btn_copy
+msgid "Copy"
+msgstr ""
+
+#: dregstr.str_dm_skip_token
+msgid "Do not write %s"
+msgstr ""
+
+#: dregstr.str_dm_maybe_protected
+msgid "The chip reported write protection before this ran, so it may have kept its old contents. Use Verify to be sure, and Unprotect if it did."
+msgstr ""

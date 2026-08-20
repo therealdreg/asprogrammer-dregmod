@@ -4,7 +4,7 @@ object MainForm: TMainForm
   Top = 209
   Width = 853
   ActiveControl = RadioSPI
-  Caption = 'AsProgrammer dregmod v3.17 - Stop all current operations: keep pressing ESC key - Launch Console: keep pressing F1 key'
+  Caption = 'AsProgrammer dregmod v5'
   ClientHeight = 541
   ClientWidth = 853
   Constraints.MinHeight = 300
@@ -699,7 +699,7 @@ object MainForm: TMainForm
     Width = 853
     Align = alBottom
     Lines.Strings = (
-      'AsProgrammer dregmod v3.17'
+      'AsProgrammer dregmod v5'
       'https://github.com/therealdreg/asprogrammer-dregmod'
       'dreg@rootkit.es'
     )
@@ -729,6 +729,12 @@ object MainForm: TMainForm
     Filter = '*.bin|*.bin|*.*|*.*'
     Options = [ofOverwritePrompt, ofEnableSizing, ofViewDetail]
     Left = 272
+    Top = 128
+  end
+  object ComPortTimer: TTimer
+    Interval = 1500
+    OnTimer = ComPortTimerTimer
+    Left = 208
     Top = 128
   end
   object MainMenu: TMainMenu
@@ -985,9 +991,15 @@ object MainForm: TMainForm
       object MenuHWBUZZPIRAT: TMenuItem
 	    Checked = True
         AutoCheck = True
-        Caption = 'Buzzpirat / Buspirate'
+        Caption = 'Buzzpirat / BusPirateV3'
         RadioItem = True
         OnClick = MenuHWBUZZPIRATClick
+      end
+      object MenuHWBUSPIRATE5: TMenuItem
+        AutoCheck = True
+        Caption = 'BusPirateV5+'
+        RadioItem = True
+        OnClick = MenuHWBUSPIRATE5Click
       end
       object MenuHWUSBASP: TMenuItem
         AutoCheck = True
@@ -1034,33 +1046,55 @@ object MainForm: TMainForm
       Caption = 'Language'
     end
 	object MenuBuzzpirat: TMenuItem
-        Caption = 'Buzzpirat / Buspirate'
+        Caption = 'Buzzpirat / BusPirateV3'
 		object MenuBuzzpiratCOMPort: TMenuItem
-          Caption = 'Buzzpirat / Buspirate COMPort:'
-          OnClick = MenuBuzzpiratCOMPortClick
-        end
-		object MenuBuzzpiratSPIBUG: TMenuItem
-          AutoCheck = True
-          Caption = 'Fix SPI Firmware Bug'
-        end
+		  Caption = 'COM port: none selected'
+		end
+		object MenuBuzzpiratSerialSpeed: TMenuItem
+		  Caption = 'Serial link speed'
+		  object MenuBuzzpiratSerial115200: TMenuItem
+			AutoCheck = True
+			Caption = '115200 baud (default, always works)'
+			Checked = True
+			RadioItem = True
+		  end
+		  object MenuBuzzpiratSerial230400: TMenuItem
+			AutoCheck = True
+			Caption = '230400 baud (2.1% clock error, avoid)'
+			RadioItem = True
+		  end
+		  object MenuBuzzpiratSerial250000: TMenuItem
+			AutoCheck = True
+			Caption = '250000 baud (exact)'
+			RadioItem = True
+		  end
+		  object MenuBuzzpiratSerial1M: TMenuItem
+			AutoCheck = True
+			Caption = '1 Mbaud (exact)'
+			RadioItem = True
+		  end
+		  object MenuBuzzpiratSerial2M: TMenuItem
+			AutoCheck = True
+			Caption = '2 Mbaud (exact, fastest)'
+			RadioItem = True
+		  end
+		end
 		object MenuBuzzpiratPullups: TMenuItem
           AutoCheck = True
-          Caption = 'Pull UPs ON (buzzif check)'
+          Caption = 'Pull UPs ON'
         end
         object MenuBuzzpiratPower: TMenuItem
 		  Checked = True
           AutoCheck = True
-          Caption = 'Power ON (buzzif check)'
+          Caption = 'Power ON'
         end
-		object MenuBuzzpiratLessdbg: TMenuItem
-		  Checked = True
+		object MenuBuzzpiratVerbose: TMenuItem
           AutoCheck = True
-          Caption = 'Less debug (TO-DO)'
+          Caption = 'Verbose log'
         end
 		object MenuBuzzpiratResetEach: TMenuItem
-		  Checked = True
           AutoCheck = True
-          Caption = 'Reset on each init (unselect for chip programming)'
+          Caption = 'Reset device on every operation (slow)'
         end
 		object MenuBuzzpiratSubI2C: TMenuItem
 			Caption = 'I2C'
@@ -1088,10 +1122,9 @@ object MainForm: TMainForm
 				RadioItem = True
 			  end
 			end
-			object MenuBuzzpiratJustI2CScan: TMenuItem
-			  Checked = False
-			  AutoCheck = True
-			  Caption = 'Just I2C Scanner'
+			object MenuBuzzpiratI2CScan: TMenuItem
+			  Caption = 'Scan the I2C bus...'
+			  OnClick = MenuBuzzpiratI2CScanClick
 			end
 		end
 		object MenuBuzzpiratSubSPI: TMenuItem
@@ -1112,27 +1145,27 @@ object MainForm: TMainForm
 			  Caption = 'Clock'
 			  object MenuBuzzpiratSPI8MHz: TMenuItem
 				AutoCheck = True
-				Caption = '8 MHz (not recommended)'
+				Caption = '8 MHz'
 				RadioItem = True
 			  end
 			  object MenuBuzzpiratSPI4MHz: TMenuItem
 				AutoCheck = True
-				Caption = '4 MHz (not recommended)'
+				Caption = '4 MHz'
 				RadioItem = True
 			  end
 			  object MenuBuzzpiratSPI2P6MHz: TMenuItem
 				AutoCheck = True
-				Caption = '2.6 MHz (not recommended)'
+				Caption = '2.6 MHz'
 				RadioItem = True
 			  end
 			  object MenuBuzzpiratSPI2MHz: TMenuItem
 				AutoCheck = True
-				Caption = '2 MHz (not recommended)'
+				Caption = '2 MHz'
 				RadioItem = True
 			  end
 			  object MenuBuzzpiratSPI1MHz: TMenuItem
 				AutoCheck = True
-				Caption = '1 MHz (not recommended)'
+				Caption = '1 MHz'
 				RadioItem = True
 			  end
 			  object MenuBuzzpiratSPI250KHz: TMenuItem
@@ -1153,28 +1186,212 @@ object MainForm: TMainForm
 			  end
 			end
 		end
+		object MenuBuzzpiratDisconnect: TMenuItem
+		  Caption = 'Disconnect and reset device'
+		  OnClick = MenuBuzzpiratDisconnectClick
+		end
 		object DebugconsoleMenuItem: TMenuItem
-		  Caption = 'Launch Console'
+		  Caption = 'Device info / voltages'
 		  OnClick = DebugconsoleMenuItemClick
 		end
-		object ClearBuzzlogMenuItem: TMenuItem
-		  Caption = 'kill tail and clear log on init'
-		  Checked = True
-          AutoCheck = True
+    end
+	object MenuHexEditor: TMenuItem
+	  Caption = 'Hexeditor'
+	  object MenuHexEditorRandom: TMenuItem
+		Caption = 'Fill with random data'
+		ShortCut = 16466
+		OnClick = MenuHexEditorRandomClick
+	  end
+	end
+	object MenuBP5: TMenuItem
+	  Caption = 'BusPirateV5+'
+		object MenuBP5COMPort: TMenuItem
+		  Caption = 'COM port: none selected'
 		end
-		object BzHelpMenuItem: TMenuItem
-			Caption = 'Help'
-		OnClick = BzHelpMenuItemClick
-    end
-    end
-	object ListcomportsMenuItem: TMenuItem
-      Caption = 'List FREE COM Ports'
-      OnClick = ListcomportsMenuItemClick
-    end
+		object MenuBP5Power: TMenuItem
+		  AutoCheck = True
+		  Checked = True
+		  Caption = 'Power ON'
+		end
+		object MenuBP5Voltage: TMenuItem
+		  Caption = 'Voltage'
+			  object MenuBP5V1V8: TMenuItem
+				AutoCheck = True
+				Caption = '1.8 V'
+				Tag = 1800
+				RadioItem = True
+			  end
+			  object MenuBP5V2V5: TMenuItem
+				AutoCheck = True
+				Caption = '2.5 V'
+				Tag = 2500
+				RadioItem = True
+			  end
+			  object MenuBP5V3V3: TMenuItem
+				AutoCheck = True
+				Caption = '3.3 V'
+				Tag = 3300
+				Checked = True
+				RadioItem = True
+			  end
+			  object MenuBP5V5V0: TMenuItem
+				AutoCheck = True
+				Caption = '5.0 V'
+				Tag = 5000
+				RadioItem = True
+			  end
+		end
+		object MenuBP5Current: TMenuItem
+		  Caption = 'Current limit'
+			  object MenuBP5CurUnlimited: TMenuItem
+				AutoCheck = True
+				Caption = 'unlimited'
+				Tag = 0
+				RadioItem = True
+			  end
+			  object MenuBP5Cur100: TMenuItem
+				AutoCheck = True
+				Caption = '100 mA'
+				Tag = 100
+				RadioItem = True
+			  end
+			  object MenuBP5Cur300: TMenuItem
+				AutoCheck = True
+				Caption = '300 mA'
+				Tag = 300
+				Checked = True
+				RadioItem = True
+			  end
+			  object MenuBP5Cur500: TMenuItem
+				AutoCheck = True
+				Caption = '500 mA'
+				Tag = 500
+				RadioItem = True
+			  end
+		end
+		object MenuBP5Pullups: TMenuItem
+		  AutoCheck = True
+		  Caption = 'Pull UPs ON'
+		end
+		object MenuBP5Verbose: TMenuItem
+		  AutoCheck = True
+		  Caption = 'Verbose log'
+		end
+		object MenuBP5ResetEach: TMenuItem
+		  AutoCheck = True
+		  Caption = 'Reconnect on every operation (slow)'
+		end
+		object MenuBP5SubI2C: TMenuItem
+		  Caption = 'I2C'
+		  object MenuBP5I2CClock: TMenuItem
+			Caption = 'Clock'
+			  object MenuBP5I2C50K: TMenuItem
+				Checked = True
+				AutoCheck = True
+				Caption = '50 kHz'
+				Tag = 50000
+				RadioItem = True
+			  end
+			  object MenuBP5I2C100K: TMenuItem
+				AutoCheck = True
+				Caption = '100 kHz'
+				Tag = 100000
+				RadioItem = True
+			  end
+			  object MenuBP5I2C400K: TMenuItem
+				AutoCheck = True
+				Caption = '400 kHz'
+				Tag = 400000
+				RadioItem = True
+			  end
+			  object MenuBP5I2C1M: TMenuItem
+				AutoCheck = True
+				Caption = '1 MHz'
+				Tag = 1000000
+				RadioItem = True
+			  end
+		  end
+		  object MenuBP5I2CScan: TMenuItem
+			Caption = 'Scan the I2C bus...'
+			OnClick = MenuBP5I2CScanClick
+		  end
+		end
+		object MenuBP5SubSPI: TMenuItem
+		  Caption = 'SPI'
+		  object MenuBP5SPIClock: TMenuItem
+			Caption = 'Clock'
+			  object MenuBP5SPI125K: TMenuItem
+				Checked = True
+				AutoCheck = True
+				Caption = '125 kHz'
+				Tag = 125000
+				RadioItem = True
+			  end
+			  object MenuBP5SPI250K: TMenuItem
+				AutoCheck = True
+				Caption = '250 kHz'
+				Tag = 250000
+				RadioItem = True
+			  end
+			  object MenuBP5SPI500K: TMenuItem
+				AutoCheck = True
+				Caption = '500 kHz'
+				Tag = 500000
+				RadioItem = True
+			  end
+			  object MenuBP5SPI1M: TMenuItem
+				AutoCheck = True
+				Caption = '1 MHz'
+				Tag = 1000000
+				RadioItem = True
+			  end
+			  object MenuBP5SPI2M: TMenuItem
+				AutoCheck = True
+				Caption = '2 MHz'
+				Tag = 2000000
+				RadioItem = True
+			  end
+			  object MenuBP5SPI4M: TMenuItem
+				AutoCheck = True
+				Caption = '4 MHz'
+				Tag = 4000000
+				RadioItem = True
+			  end
+			  object MenuBP5SPI8M: TMenuItem
+				AutoCheck = True
+				Caption = '8 MHz'
+				Tag = 8000000
+				RadioItem = True
+			  end
+			  object MenuBP5SPI16M: TMenuItem
+				AutoCheck = True
+				Caption = '16 MHz'
+				Tag = 16000000
+				RadioItem = True
+			  end
+		  end
+		end
+		object MenuBP5Disconnect: TMenuItem
+		  Caption = 'Disconnect (HiZ, supply off)'
+		  OnClick = MenuBP5DisconnectClick
+		end
+		object MenuBP5Info: TMenuItem
+		  Caption = 'Device info / voltages'
+		  OnClick = MenuBP5InfoClick
+		end
+		object MenuBP5Help: TMenuItem
+		  Caption = 'Bus Pirate v5+ documentation'
+		  OnClick = MenuBP5HelpClick
+		end
+	end
 	object CreditsMenuItem: TMenuItem
       Caption = 'Credits'
       OnClick = CreditsMenuItemClick
     end
+	object BzHelpMenuItem: TMenuItem
+	  Caption = 'Help'
+	  OnClick = BzHelpMenuItemClick
+	end
   end
   object ImageList: TImageList
     Height = 32
@@ -1402,6 +1619,10 @@ object MainForm: TMainForm
     object MenuCopyToClip: TMenuItem
       Caption = 'Копировать'
       OnClick = MenuCopyToClipClick
+    end
+    object MenuHexEditorPopupRandom: TMenuItem
+      Caption = 'Fill with random data'
+      OnClick = MenuHexEditorRandomClick
     end
   end
   object LogPopupMenu: TPopupMenu

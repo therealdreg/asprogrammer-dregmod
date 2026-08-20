@@ -5,7 +5,15 @@ unit spi25;
 interface
 
 uses
-  Classes, Forms, SysUtils, utilfunc, BaseHW;
+  Classes, Forms, SysUtils, utilfunc;
+
+type
+  //Lets a long wait be interrupted without this unit having to know about the
+  //GUI. nil means nothing ever cancels.
+  TUsbAspCancelQuery = function: boolean;
+
+var
+  UsbAsp25_OnCancel: TUsbAspCancelQuery = nil;
 
 const
 
@@ -23,6 +31,10 @@ type
   end;
 
 function UsbAsp25_Busy(): boolean;
+//Waits until the chip reports that its erase or program cycle has finished.
+//False means it never did: LinkLost tells the two cases apart - the status
+//register could not be read at all, or the cancel query said stop.
+function UsbAsp25_WaitReady(out LinkLost: boolean): boolean;
 
 function EnterProgMode25(spiSpeed: integer; SendAB: boolean = false): boolean;
 procedure ExitProgMode25;
@@ -50,7 +62,6 @@ function UsbAsp25_EX4B(): integer;
 
 function SPIRead(CS: byte; BufferLen: integer; out buffer: array of byte): integer;
 function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer;
-function SPIReadWrite(CSR: byte; CSW: byte; RBufferLen: integer; out rbuffer: array of byte; WBufferLen: integer; wbuffer: array of byte): integer;
 
 implementation
 
@@ -66,6 +77,34 @@ begin
 
   UsbAsp25_ReadSR(sreg);
   if not IsBitSet(sreg, 0) then Result := False;
+end;
+
+function UsbAsp25_WaitReady(out LinkLost: boolean): boolean;
+var
+  sreg: byte;
+begin
+  LinkLost := false;
+  repeat
+    sreg := $FF;
+
+    //A status read that fails is a link failure, not an answer. Reporting
+    //"ready" here would be the worst of both worlds: an erase or a page
+    //program would carry on against a chip that is still mid cycle, the writes
+    //would be discarded, and the operation would finish with "Done". Reporting
+    //"busy" - which is what a bare UsbAsp25_Busy does, since sreg keeps its
+    //$FF - spins here for ever on a link that is never going to answer. So
+    //stop, and hand the caller something it can report.
+    if UsbAsp25_ReadSR(sreg) < 1 then
+    begin
+      LinkLost := true;
+      Exit(false);
+    end;
+
+    if not IsBitSet(sreg, 0) then Exit(true);
+
+    Application.ProcessMessages;
+    if Assigned(UsbAsp25_OnCancel) and UsbAsp25_OnCancel() then Exit(false);
+  until false;
 end;
 
 //Вход в режим программирования
@@ -127,15 +166,8 @@ begin
   buff[2] := hi(lo(addr));
   buff[3] := lo(addr);
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, 4, buff, bufflen, buffer);
-  end
-  else
-  begin
-      SPIWrite(0, 4, buff);
-      result := SPIRead(1, bufflen, buffer);
-  end;
+  SPIWrite(0, 4, buff);
+  result := SPIRead(1, bufflen, buffer);
 end;
 
 function UsbAsp25_Read32bitAddr(Opcode: byte; Addr: longword; var buffer: array of byte; bufflen: integer): integer;
@@ -149,15 +181,8 @@ begin
   buff[3] := hi(lo(addr));
   buff[4] := lo(lo(addr));
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, 5, buff, bufflen, buffer);
-  end
-  else
-  begin
-      SPIWrite(0, 5, buff);
-      result := SPIRead(1, bufflen, buffer);
-  end;
+  SPIWrite(0, 5, buff);
+  result := SPIRead(1, bufflen, buffer);
 end;
 
 function UsbAsp25_Wren(): integer;
@@ -220,15 +245,8 @@ end;
 
 function UsbAsp25_ReadSR(var sreg: byte; opcode: byte = $05): integer;
 begin
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-    begin
-      result := AsProgrammer.Programmer.SPIWriteRead(1, 1, opcode, 1, sreg);
-    end
-    else
-    begin
-         SPIWrite(0, 1, opcode);
-         result := SPIRead(1, 1, sreg);
-    end;
+  SPIWrite(0, 1, opcode);
+  result := SPIRead(1, 1, sreg);
 end;
 
 //Возвращает сколько байт записали
@@ -305,6 +323,15 @@ begin
   UsbAsp25_Wren;
   buff:= $E9;
   result := SPIWrite(1, 1, buff);
+  //Mirror of what EN4B does. On Spansion and Cypress parts the bank register
+  //bit is the mechanism, not the $B7 opcode, so undoing only the opcode leaves
+  //the chip latched in four byte mode. Every later operation that legitimately
+  //picks three byte addressing then talks to the wrong address, and nothing
+  //short of a power cycle clears it.  By Dreg
+  buff:= $17;
+  SPIWrite(0, 1, buff);
+  buff:= %00000000; //EXTADD=0
+  result := SPIWrite(1, 1, buff);
 end;
 
 function SPIRead(CS: byte; BufferLen: integer; out buffer: array of byte): integer;
@@ -315,19 +342,6 @@ end;
 function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer;
 begin
   result := AsProgrammer.Programmer.SPIWrite(CS, BufferLen, buffer);
-end;
-
-function SPIReadWrite(CSR: byte; CSW: byte; RBufferLen: integer; out rbuffer: array of byte; WBufferLen: integer; wbuffer: array of byte): integer;
-begin
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    result := AsProgrammer.Programmer.SPIWriteRead(1, WBufferLen, wbuffer, RBufferLen, rbuffer);
-  end
-  else
-  begin
-       SPIWrite(CSW, WBufferLen, wbuffer);
-       result := SPIRead(CSR, RBufferLen, rbuffer);
-  end;
 end;
 
 end.

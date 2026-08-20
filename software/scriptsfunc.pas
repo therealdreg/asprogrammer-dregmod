@@ -28,9 +28,13 @@ var
   i: integer;
   ScriptText: TStrings;
 begin
+  //Create the list before the guard, not after. Exiting first left the function
+  //result unassigned, which is whatever happened to be in that register, and
+  //every caller then treats it as a TStrings and frees it. Selecting a chip
+  //whose script file is missing is enough to reach it.  By Dreg
+  Result:= TStringList.Create;
   if not FileExists(ScriptsPath+ScriptFile) then Exit;
 
-  Result:= TStringList.Create;
   ScriptText:= TStringList.Create;
 
   ScriptText.LoadFromFile(ScriptsPath+ScriptFile);

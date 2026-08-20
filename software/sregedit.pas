@@ -5,7 +5,8 @@ unit sregedit;
 interface
 
 uses
-  Classes, SysUtils, FileUtil, Forms, Controls, Graphics, Dialogs, StdCtrls;
+  Classes, SysUtils, FileUtil, Forms, Controls, Graphics, Dialogs, StdCtrls,
+  dregstr;
 
 type
   TSregTypeList = (ST_MACRONIX, ST_WINBOND, ST_GIGADEVICE);
@@ -170,13 +171,23 @@ begin
     if not OpenDevice() then exit;
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
 
-    UsbAsp25_ReadSR(sreg1);
+    //All three start at zero. They are ordinary locals, so on a chip that is
+    //neither Macronix nor Winbond/GigaDevice the second and third were never
+    //written at all and whatever was on the stack got painted into the
+    //checkboxes as the chip's status. A failed read did the same, because
+    //UsbAsp25_ReadSR returns the byte count and nobody looked at it.  By Dreg
+    sreg1 := 0;
+    sreg2 := 0;
+    sreg3 := 0;
+
+    if UsbAsp25_ReadSR(sreg1) < 1 then
+    begin
+      LogPrint(STR_DM_SREG_NO_ANSWER);
+      Exit;
+    end;
 
     if SREGType = ST_MACRONIX then
-    begin
       UsbAsp25_ReadSR(sreg2, $15);
-      sreg3 := 0;
-    end;
 
     if (SREGType = ST_WINBOND) or (SREGType = ST_GIGADEVICE) then
     begin
@@ -206,22 +217,14 @@ begin
     UsbAsp25_WREN();
     UsbAsp25_WriteSR(GetSreg1CheckBox());
 
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitChipReady then Exit;
 
     if SREGType = ST_MACRONIX then
     begin
       UsbAsp25_WREN();
       UsbAsp25_WriteSR_2byte(GetSreg1CheckBox(), GetSreg2CheckBox());
 
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitChipReady then Exit;
     end;
 
     if (SREGType = ST_WINBOND) or (SREGType = ST_GIGADEVICE) then
@@ -229,20 +232,12 @@ begin
       UsbAsp25_WREN();
       UsbAsp25_WriteSR(GetSreg2CheckBox(), $31);
 
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitChipReady then Exit;
 
       UsbAsp25_WREN();
       UsbAsp25_WriteSR(GetSreg3CheckBox(), $11);
 
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitChipReady then Exit;
     end;
 
   finally

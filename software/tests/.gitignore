@@ -1,0 +1,16 @@
+# Test tooling for the Bus Pirate back ends.
+# By Dreg
+
+# Chip images captured by bp_stress.py. These are dumps of whatever hardware
+# happened to be on the bench, they are large, and they are not source.
+backup/
+*.bin
+
+# Intermediates and the binary from build_bp5probe.cmd.
+build/
+*.exe
+*.ppu
+*.o
+*.or
+*.a
+*.rsj

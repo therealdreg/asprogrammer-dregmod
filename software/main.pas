@@ -12,10 +12,11 @@ uses
   Classes, SysUtils, LazFileUtils, Forms, Controls, Graphics, Dialogs, StdCtrls,
   ExtCtrls, ComCtrls, Menus, ActnList, Buttons, StrUtils, spi25,
   spi45, spi95, i2c, microwire, spimulti, ft232hhw,
-  XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
+  XMLRead, XMLWrite, DOM, msgstr, dregstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8,
-  pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw, buzzpirathw;
+  pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw,
+  buzzpirathw, buspirate5hw;
 
 type
 
@@ -96,6 +97,43 @@ type
     AllowInsertItem: TMenuItem;
     MenuHWARDUINO: TMenuItem;
     MenuHWBUZZPIRAT: TMenuItem;
+    MenuHWBUSPIRATE5: TMenuItem;
+    MenuBP5: TMenuItem;
+    MenuBP5COMPort: TMenuItem;
+    MenuBP5Power: TMenuItem;
+    MenuBP5Voltage: TMenuItem;
+    MenuBP5V1V8: TMenuItem;
+    MenuBP5V2V5: TMenuItem;
+    MenuBP5V3V3: TMenuItem;
+    MenuBP5V5V0: TMenuItem;
+    MenuBP5Current: TMenuItem;
+    MenuBP5CurUnlimited: TMenuItem;
+    MenuBP5Cur100: TMenuItem;
+    MenuBP5Cur300: TMenuItem;
+    MenuBP5Cur500: TMenuItem;
+    MenuBP5Pullups: TMenuItem;
+    MenuBP5Verbose: TMenuItem;
+    MenuBP5ResetEach: TMenuItem;
+    MenuBP5SubSPI: TMenuItem;
+    MenuBP5SPIClock: TMenuItem;
+    MenuBP5SPI125K: TMenuItem;
+    MenuBP5SPI250K: TMenuItem;
+    MenuBP5SPI500K: TMenuItem;
+    MenuBP5SPI1M: TMenuItem;
+    MenuBP5SPI2M: TMenuItem;
+    MenuBP5SPI4M: TMenuItem;
+    MenuBP5SPI8M: TMenuItem;
+    MenuBP5SPI16M: TMenuItem;
+    MenuBP5SubI2C: TMenuItem;
+    MenuBP5I2CClock: TMenuItem;
+    MenuBP5I2C50K: TMenuItem;
+    MenuBP5I2C100K: TMenuItem;
+    MenuBP5I2C400K: TMenuItem;
+    MenuBP5I2C1M: TMenuItem;
+    MenuBP5I2CScan: TMenuItem;
+    MenuBP5Disconnect: TMenuItem;
+    MenuBP5Info: TMenuItem;
+    MenuBP5Help: TMenuItem;
     MenuArduinoSPIClock: TMenuItem;
     MenuArduinoISP8MHz: TMenuItem;
     MenuArduinoISP4MHz: TMenuItem;
@@ -109,15 +147,26 @@ type
     CreditsMenuItem: TMenuItem;
     BzHelpMenuItem: TMenuItem;
     DebugconsoleMenuItem: TMenuItem;
-    ListcomportsMenuItem: TMenuItem;
+    ComPortTimer: TTimer;
+    MenuHexEditor: TMenuItem;
+    MenuHexEditorRandom: TMenuItem;
+    MenuHexEditorPopupRandom: TMenuItem;
     MenuItemHardware: TMenuItem;
     MenuBuzzpirat: TMenuItem;
     MenuBuzzpiratPullups: TMenuItem;
-    MenuBuzzpiratSPIBUG: TMenuItem;
     MenuBuzzpiratResetEach: TMenuItem;
-    ClearBuzzlogMenuItem: TMenuItem;
+    MenuBuzzpiratDisconnect: TMenuItem;
     MenuBuzzpiratPower: TMenuItem;
-	MenuBuzzpiratLessdbg: TMenuItem;
+    MenuBuzzpiratVerbose: TMenuItem;
+    MenuBuzzpiratSerialSpeed: TMenuItem;
+    MenuBuzzpiratSerial115200: TMenuItem;
+    MenuBuzzpiratSerial230400: TMenuItem;
+    MenuBuzzpiratSerial250000: TMenuItem;
+    MenuBuzzpiratSerial1M: TMenuItem;
+    MenuBuzzpiratSerial2M: TMenuItem;
+    MenuBuzzpiratSubI2C: TMenuItem;
+    MenuBuzzpiratSubSPI: TMenuItem;
+    MenuBuzzpiratSPIClock: TMenuItem;
     MenuBuzzpiratSPINormal: TMenuItem;
     MenuBuzzpiratSPIHiz: TMenuItem;
     MenuBuzzpiratSPI8MHz: TMenuItem;
@@ -133,7 +182,7 @@ type
     MenuBuzzpiratI2C100KHz: TMenuItem;
     MenuBuzzpiratI2C50KHz: TMenuItem;
     MenuBuzzpiratI2C5KHz: TMenuItem;
-    MenuBuzzpiratJustI2CScan: TMenuItem;
+    MenuBuzzpiratI2CScan: TMenuItem;
     MenuItemBenchmark: TMenuItem;
     MenuItemEditSreg: TMenuItem;
     MenuItemReadSreg: TMenuItem;
@@ -196,9 +245,17 @@ type
     procedure ChangeLang(Sender: TObject);
     procedure ComboItem1Click(Sender: TObject);
     procedure MenuArduinoCOMPortClick(Sender: TObject);
-    procedure MenuBuzzpiratCOMPortClick(Sender: TObject);
+    procedure MenuBuzzpiratDisconnectClick(Sender: TObject);
+    procedure MenuBuzzpiratI2CScanClick(Sender: TObject);
+    procedure MenuHexEditorRandomClick(Sender: TObject);
+    procedure ComPortTimerTimer(Sender: TObject);
     procedure MenuHWARDUINOClick(Sender: TObject);
     procedure MenuHWBUZZPIRATClick(Sender: TObject);
+    procedure MenuHWBUSPIRATE5Click(Sender: TObject);
+    procedure MenuBP5DisconnectClick(Sender: TObject);
+    procedure MenuBP5I2CScanClick(Sender: TObject);
+    procedure MenuBP5InfoClick(Sender: TObject);
+    procedure MenuBP5HelpClick(Sender: TObject);
     procedure MenuHWAVRISPClick(Sender: TObject);
     procedure MenuCopyToClipClick(Sender: TObject);
     procedure MenuFindChipClick(Sender: TObject);
@@ -228,19 +285,39 @@ type
     procedure CreditsMenuItemClick(Sender: TObject);
     procedure BzHelpMenuItemClick(Sender: TObject);
     procedure DebugconsoleMenuItemClick(Sender: TObject);
-    procedure ListcomportsMenuItemClick(Sender: TObject);
     procedure SpeedButton1Click(Sender: TObject);
     procedure StartAddressEditChange(Sender: TObject);
     procedure StartAddressEditKeyPress(Sender: TObject; var Key: char);
     procedure VerifyFlash(BlankCheck: boolean = false);
   private
     { private declarations }
+    //Last state the COM port submenu was built from, so the polling timer only
+    //touches the menu when something actually changed.
+    FCOMPortMenuSig: string;
+    FBP5PortMenuSig: string;
+    procedure BuzzpiratCOMPortItemClick(Sender: TObject);
+    procedure BP5COMPortItemClick(Sender: TObject);
+    //Shared by the report windows built at run time.
+    procedure ReportCopyClick(Sender: TObject);
+    procedure ReportListDblClick(Sender: TObject);
   public
     { public declarations }
+    //Rebuilds the Buzzpirat COM port submenu from the ports the system reports.
+    procedure RefreshCOMPortMenu;
+    //Same, for the Bus Pirate v5+ - but built from the USB registry, so it can
+    //name the device and pick its BPIO2 interface rather than the terminal one.
+    procedure RefreshBP5PortMenu;
+    //Renders one I2C scan result and lets the user adopt an address. Shared by
+    //both Bus Pirate back ends, so the caller supplies the descriptions.
+    procedure ShowI2CScanResult(const Found: TBytes; const APort, ABusDesc: string;
+                                ALines: TStrings);
+    //Copies a 7-bit I2C address into the A0..A2 / device type toggles.
+    procedure ApplyI2CAddress(Addr: byte);
 
   end;
 
   procedure LogPrint(text: string);
+  function PageSizeFromUI: word;
   procedure SaveOptions(XMLfile: TXMLDocument);
   Procedure LoadOptions(XMLfile: TXMLDocument);
   procedure LoadXML;
@@ -249,6 +326,9 @@ type
   function SetSPISpeed(OverrideSpeed: byte): integer;
   procedure SyncUI_ICParam();
   function UserCancel(): boolean;
+  function WaitChipReady: boolean;
+  function MenuCheckedTag(Parent: TMenuItem; Default: PtrInt): PtrInt;
+  procedure MenuCheckByTag(Parent: TMenuItem; Value: PtrInt);
 
 const
   SPI_CMD_25             = 0;
@@ -290,6 +370,19 @@ var
   Arduino_COMPort: string;
   Arduino_BaudRate: integer = 921600;
   Buzzpirat_COMPort: string;
+
+  //The one Buzzpirat back end, kept here so the COM port menu, the bus scanner
+  //and the device report can reach it even when another programmer is selected.
+  BuzzpiratDev: TBuzzpiratHardware = nil;
+
+  //Same for the Bus Pirate v5+ back end. The two are independent and can hold
+  //different COM ports open at the same time.
+  BusPirate5_COMPort: string;
+  BusPirate5Dev: TBusPirate5Hardware = nil;
+
+//Shows text in a resizable window with a fixed pitch font, for reports whose
+//columns have to line up.
+procedure ShowMonospaceReport(const ATitle, AText: string);
 implementation
 
 
@@ -361,7 +454,12 @@ begin
       on E: EXMLReadError do
       begin
         ShowMessage(E.Message);
-        SettingsFile := nil;
+        //Start a fresh document rather than leaving it nil. A file that will
+        //not parse used to mean every later save silently did nothing, so the
+        //session's settings were lost and the broken file stayed broken.
+        //By Dreg
+        SettingsFile := TXMLDocument.Create;
+        SettingsFile.AppendChild(SettingsFile.CreateElement('settings'));
       end;
     end;
   end else
@@ -447,8 +545,16 @@ begin
   if CurrentLang = '' then
   begin
     CurrentLang := 'en';
-    LRSTranslator:= TPOTranslator.Create(PODirectory + CurrentLang + '.po');
-    Translations.TranslateResourceStrings(PODirectory + CurrentLang + '.po');
+    //Guarded like the branch below it. TPOTranslator.Create raises when the
+    //file is not there, and this is the default path, so a lang directory that
+    //did not ship, or an installation run from a different working directory,
+    //took the program down at startup rather than simply going untranslated.
+    //By Dreg
+    if FileExistsUTF8(PODirectory + CurrentLang + '.po') then
+    begin
+      LRSTranslator:= TPOTranslator.Create(PODirectory + CurrentLang + '.po');
+      Translations.TranslateResourceStrings(PODirectory + CurrentLang + '.po');
+    end;
     Exit;
   end;
 
@@ -463,6 +569,33 @@ end;
 procedure LogPrint(text: string);
 begin
   MainForm.Log.Lines.Add(text);
+end;
+
+//The page size box is an editable combo, so the number in it is whatever the
+//user typed. Every flash routine that takes it indexes a 2048 byte stack array
+//with it, and only the two I2C read paths ever checked. Clamp it here, once,
+//and say so rather than quietly using a different size than the box shows.
+//By Dreg
+function PageSizeFromUI: word;
+const
+  MAX_PAGE = 2048;   //the size of the DataChunk arrays every writer uses
+var
+  n: int64;
+begin
+  n := StrToInt64Def(Trim(MainForm.ComboPageSize.Text), 0);
+  if n < 1 then
+  begin
+    n := 1;
+    MainForm.ComboPageSize.Text := '1';
+  end;
+  if n > MAX_PAGE then
+  begin
+    LogPrint(Format('Page size %d is larger than this program can transfer in ' +
+                    'one go, using %d instead', [n, MAX_PAGE]));
+    n := MAX_PAGE;
+    MainForm.ComboPageSize.Text := IntToStr(MAX_PAGE);
+  end;
+  result := word(n);
 end;
 
 
@@ -519,6 +652,9 @@ function SetSPISpeed(OverrideSpeed: byte): integer;
 var
   Speed: byte;
 begin
+  //Not every programmer has a speed menu (Buzzpirat takes its clock from its
+  //own submenu instead), so start from a defined value.
+  Speed := 0;
   if AsProgrammer.Current_HW = CHW_ARDUINO then
   begin
     if MainForm.MenuArduinoISP8Mhz.Checked then Speed := MainForm.MenuArduinoISP8Mhz.Tag;
@@ -527,13 +663,11 @@ begin
     if MainForm.MenuArduinoISP1Mhz.Checked then Speed := MainForm.MenuArduinoISP1Mhz.Tag;
   end;
 
-  if AsProgrammer.Current_HW = CHW_BUZZPIRAT then
-  begin
-    if MainForm.MenuArduinoISP8Mhz.Checked then Speed := MainForm.MenuArduinoISP8Mhz.Tag;
-    if MainForm.MenuArduinoISP4Mhz.Checked then Speed := MainForm.MenuArduinoISP4Mhz.Tag;
-    if MainForm.MenuArduinoISP2Mhz.Checked then Speed := MainForm.MenuArduinoISP2Mhz.Tag;
-    if MainForm.MenuArduinoISP1Mhz.Checked then Speed := MainForm.MenuArduinoISP1Mhz.Tag;
-  end;
+  //Neither Bus Pirate back end takes its clock from here. Both read their own
+  //menu inside the driver, because the number this function returns is an index
+  //into a table that is specific to the programmer, and theirs are not the same
+  //table. There used to be a CHW_BUZZPIRAT branch here that read the Arduino
+  //menu items; it was copy-paste and its result was discarded.  By Dreg
 
   if AsProgrammer.Current_HW = CHW_AVRISP then
   begin
@@ -707,7 +841,7 @@ var
   DataChunk2: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
   PageSizeTemp: word;
-  i: integer;
+  i, Got: integer;
   SkipPage: boolean = false;
 begin
   if (WriteSize = 0) then
@@ -725,8 +859,13 @@ begin
   Address := StartAddress;
   MainForm.ProgressBar.Max := WriteSize div PageSize;
 
-  if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
-
+  //What decides is the highest address this pass touches, not how many bytes
+  //it moves: three byte addressing cannot express anything at or above 16 MB.
+  //Sizing it from WriteSize means a small buffer written high up a 32 MB chip
+  //silently wraps to a low address - and a Verify with the same bug wraps to
+  //the same place and confirms it.
+  if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+try
   while (Address-StartAddress) < WriteSize do
   begin
     //Только вначале aai
@@ -734,10 +873,18 @@ begin
     //Вначале страницы
     (WriteType = WT_PAGE) then UsbAsp25_WREN();
 
-    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
-        if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 2) then
-           PageSize := (StrToInt(MainForm.ComboChipSize.Text) - StartAddress) mod PageSize else
-              PageSize := PageSizeTemp;
+    //Determines first page buffer size to prevent buffer "rolls over" on address boundary.
+    //The first chunk stops at the next page boundary; every chunk after it is a
+    //whole page. The old formula used the chip size instead of the offset into
+    //the page and returned 0 for any page aligned start address, which left the
+    //loop writing nothing and never advancing Address.
+    if (Address = StartAddress) and (PageSizeTemp > 2) then
+    begin
+      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp);
+      if PageSize = 0 then PageSize := PageSizeTemp;
+    end
+    else
+      PageSize := PageSizeTemp;
 
     if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
     RomStream.ReadBuffer(DataChunk, PageSize);
@@ -772,7 +919,7 @@ begin
 
       if not SkipPage then
       begin
-        if WriteSize > FLASH_SIZE_128MBIT then //Память больше 128Мбит
+        if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then //Память больше 128Мбит
         begin
           //4 байтная адресация
           BytesWrite := BytesWrite + UsbAsp25_Write32bitAddr($02, Address, datachunk, PageSize)
@@ -783,20 +930,28 @@ begin
     end;
 
     if (not MainForm.MenuIgnoreBusyBit.Checked) and (not SkipPage) then  //Игнорировать проверку
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitChipReady then Exit;
 
     if (MainForm.MenuAutoCheck.Checked) and (WriteType = WT_PAGE) then
     begin
-	  
-      if WriteSize > FLASH_SIZE_128MBIT then
-        UsbAsp25_Read32bitAddr($03, Address, datachunk2, PageSize)
+      //Same rule as the write above and as EN4B/EX4B: what decides is the
+      //highest address touched. Reading back with three address bytes from a
+      //chip that was just put into four byte mode compares the wrong page and
+      //fails a write that actually worked.
+      if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then
+        Got := UsbAsp25_Read32bitAddr($03, Address, datachunk2, PageSize)
       else
-        UsbAsp25_Read($03, Address, datachunk2, PageSize);
-		  
+        Got := UsbAsp25_Read($03, Address, datachunk2, PageSize);
+
+      //Without this a failed read-back compares DataChunk2 from the *previous*
+      //page, which can match and let a page that was never written pass.
+      if Got <> PageSize then
+      begin
+        LogPrint(STR_WRONG_BYTES_READ + ' @ 0x' + IntToHex(Address, 8));
+        MainForm.ProgressBar.Position := 0;
+        Exit;
+      end;
+
       for i:=0 to PageSize-1 do
         if DataChunk2[i] <> DataChunk[i] then
         begin
@@ -812,9 +967,14 @@ begin
 
     if UserCancel then Break;
   end;
-
-  if WriteSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+finally
+  //Must match the EN4B condition exactly, and must run on the abort paths too:
+  //leaving the chip latched in four byte address mode poisons every later
+  //operation that legitimately picks three byte addressing. The mode is
+  //volatile but survives CS, DevClose and anything short of a power cycle.
+  if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
   UsbAsp25_Wrdi(); //Для sst
+end;
 
   if BytesWrite <> WriteSize then
     LogPrint(STR_WRONG_BYTES_WRITE)
@@ -851,10 +1011,18 @@ begin
   begin
     UsbAsp95_WREN();
 
-    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
-        if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 1) then
-           PageSize := (ChipSize - StartAddress) mod PageSize else
-              PageSize := PageSizeTemp;
+    //Trims the first chunk so a page write does not roll over a page boundary.
+    //Same correction WriteFlash25 and WriteFlashI2C already carry: using the
+    //chip size instead of the offset into the page evaluates to zero for any
+    //page aligned non-zero start address, and a page size of zero writes
+    //nothing while the address never advances.  By Dreg
+    if (Address = StartAddress) and (PageSizeTemp > 1) then
+    begin
+      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp);
+      if PageSize = 0 then PageSize := PageSizeTemp;
+    end
+    else
+      PageSize := PageSizeTemp;
 
     if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
     RomStream.ReadBuffer(DataChunk, PageSize);
@@ -862,11 +1030,7 @@ begin
     BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
 
     if not MainForm.MenuIgnoreBusyBit.Checked then  //Игнорировать проверку
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitChipReady then Exit;
 
     if MainForm.MenuAutoCheck.Checked then
     begin
@@ -922,11 +1086,7 @@ begin
     BytesWrite := BytesWrite + UsbAsp95_Write(ChipSize, Address, datachunk, PageSize);
 
     if not MainForm.MenuIgnoreBusyBit.Checked then  //Игнорировать проверку
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitChipReady then Exit;
 
     if MainForm.MenuAutoCheck.Checked then
     begin
@@ -1129,7 +1289,7 @@ const
   FLASH_SIZE_128MBIT = 16777216;
 var
   ChunkSize: Word;
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..65534] of byte;
   Address: cardinal;
 begin
@@ -1143,6 +1303,14 @@ begin
     ChunkSize := 16787 else
   if ASProgrammer.Current_HW = CHW_CH347 then
     ChunkSize := SizeOf(DataChunk)
+  else
+  if ASProgrammer.Current_HW = CHW_BUZZPIRAT then
+    //One firmware side bulk buffer, so one round trip per chunk.
+    ChunkSize := BP_MAX_BULK
+  else
+  if ASProgrammer.Current_HW = CHW_BUSPIRATE5 then
+    //BPIO2's own limit, read back from the device at connect time.
+    ChunkSize := BusPirate5Dev.MaxRead
   else
     ChunkSize := 2048;
 
@@ -1158,16 +1326,26 @@ begin
   RomStream.Clear;
 
   if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
-
+try
   while Address < ChipSize do
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
     if ChipSize > FLASH_SIZE_128MBIT then
-      BytesRead := BytesRead + UsbAsp25_Read32bitAddr($03, Address, datachunk, ChunkSize)
+      Got := UsbAsp25_Read32bitAddr($03, Address, datachunk, ChunkSize)
     else
-      BytesRead := BytesRead + UsbAsp25_Read($03, Address, datachunk, ChunkSize);
+      Got := UsbAsp25_Read($03, Address, datachunk, ChunkSize);
 
+    //A failed chunk must never reach the image. DataChunk still holds the
+    //previous one, and writing that would put a plausible looking duplicate in
+    //the dump that nothing downstream can tell apart from real data.
+    if Got <> ChunkSize then
+    begin
+      LogPrint(STR_WRONG_BYTES_READ + ' @ 0x' + IntToHex(Address, 8));
+      Break;
+    end;
+
+    Inc(BytesRead, Got);
     RomStream.WriteBuffer(datachunk, chunksize);
     Inc(Address, ChunkSize);
 
@@ -1176,10 +1354,17 @@ begin
 
     if UserCancel then Break;
   end;
-
+finally
+  //The only four byte mode loop that was not protected. An exception anywhere
+  //above used to leave the chip latched, which then breaks every later
+  //operation that legitimately picks three byte addressing, until the part is
+  //power cycled.  By Dreg
   if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+end;
 
-  if BytesRead <> ChipSize then
+  //The loop covers StartAddress..ChipSize, so that - not ChipSize - is how
+  //many bytes a complete read produces.
+  if BytesRead <> integer(ChipSize - StartAddress) then
     LogPrint(STR_WRONG_BYTES_READ)
   else
     LogPrint(STR_DONE);
@@ -1330,7 +1515,7 @@ const
   FLASH_SIZE_128MBIT = 16777216;
 var
   ChunkSize: Word;
-  BytesRead, i: integer;
+  BytesRead, Got, i: integer;
   DataChunk: array[0..16786] of byte;
   DataChunkFile: array[0..16786] of byte;
   Address: cardinal;
@@ -1344,6 +1529,12 @@ begin
   if ASProgrammer.Current_HW = CHW_FT232H then
     ChunkSize := SizeOf(DataChunk)
   else
+  if ASProgrammer.Current_HW = CHW_BUZZPIRAT then
+    ChunkSize := BP_MAX_BULK
+  else
+  if ASProgrammer.Current_HW = CHW_BUSPIRATE5 then
+    ChunkSize := BusPirate5Dev.MaxRead
+  else
     ChunkSize := 2048;
 
   if ChunkSize > DataSize then ChunkSize := DataSize;
@@ -1353,16 +1544,32 @@ begin
   Address := StartAddress;
   MainForm.ProgressBar.Max := DataSize div ChunkSize;
 
-  if DataSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
-
+  //Three byte addressing can only express addresses below 16 MB, so what
+  //decides is the highest address this pass touches - not how many bytes it
+  //moves. Verifying a small range high up a 32 MB chip needs four byte
+  //addressing just as much as verifying the whole chip does; picking it from
+  //the transfer size makes the verify wrap to a low address, where it happily
+  //re-reads whatever a write with the same bug just put there.
+  if (StartAddress + DataSize) > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+try
   while (Address-StartAddress) < DataSize do
   begin
     if ChunkSize > (DataSize - (Address-StartAddress)) then ChunkSize := DataSize - (Address-StartAddress);
 
-    if DataSize > FLASH_SIZE_128MBIT then
-        BytesRead := BytesRead + UsbAsp25_Read32bitAddr($03, Address, datachunk, ChunkSize)
+    if (StartAddress + DataSize) > FLASH_SIZE_128MBIT then
+        Got := UsbAsp25_Read32bitAddr($03, Address, datachunk, ChunkSize)
       else
-        BytesRead := BytesRead + UsbAsp25_Read($03, Address, datachunk, ChunkSize);
+        Got := UsbAsp25_Read($03, Address, datachunk, ChunkSize);
+
+    //Comparing a stale buffer would report a mismatch at the wrong address, or
+    //no mismatch at all. Neither is an answer.
+    if Got <> ChunkSize then
+    begin
+      LogPrint(STR_WRONG_BYTES_READ + ' @ 0x' + IntToHex(Address, 8));
+      MainForm.ProgressBar.Position := 0;
+      Exit;
+    end;
+    Inc(BytesRead, Got);
 
     RomStream.ReadBuffer(DataChunkFile, ChunkSize);
 
@@ -1381,10 +1588,13 @@ begin
 
     if UserCancel then Break;
   end;
+finally
+  //Both early Exits above leave the loop, so the four byte mode has to be
+  //undone here or the chip stays latched in it for every later operation.
+  if (StartAddress + DataSize) > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+end;
 
-  if DataSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
-
-  if (BytesRead <> DataSize) then
+  if (BytesRead <> integer(DataSize)) then
     LogPrint(STR_WRONG_BYTES_READ)
   else
     LogPrint(STR_DONE);
@@ -1607,7 +1817,7 @@ end;
 
 procedure ReadFlashI2C(var RomStream: TMemoryStream; StartAddress, ChipSize: cardinal; ChunkSize: Word; DevAddr: byte);
 var
-  BytesRead: integer;
+  BytesRead, Got: integer;
   DataChunk: array[0..255] of byte;
   Address: cardinal;
 begin
@@ -1632,7 +1842,17 @@ begin
   begin
     if ChunkSize > (ChipSize - Address) then ChunkSize := ChipSize - Address;
 
-    BytesRead := BytesRead + UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
+    Got := UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
+
+    //Never let a failed chunk into the image: DataChunk still holds the
+    //previous one and the duplicate would be indistinguishable from real data.
+    if Got <> ChunkSize then
+    begin
+      LogPrint(STR_WRONG_BYTES_READ + ' @ 0x' + IntToHex(Address, 8));
+      Break;
+    end;
+
+    Inc(BytesRead, Got);
     RomStream.WriteBuffer(DataChunk, ChunkSize);
     Inc(Address, ChunkSize);
 
@@ -1641,7 +1861,9 @@ begin
     if UserCancel then Break;
   end;
 
-  if BytesRead <> ChipSize then
+  //The loop covers StartAddress..ChipSize, so that is what a complete read
+  //produces - not ChipSize.
+  if BytesRead <> integer(ChipSize - StartAddress) then
     LogPrint(STR_WRONG_BYTES_READ)
   else
     LogPrint(STR_DONE);
@@ -1654,6 +1876,8 @@ var
   DataChunk: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
   PageSizeTemp: word;
+  BusyDeadline: QWord;
+  PageAddr: cardinal;
 begin
   if {(StartAddress >= WriteSize) or} (WriteSize = 0) {or (PageSize > WriteSize)} then
   begin
@@ -1669,21 +1893,43 @@ begin
 
   while (Address-StartAddress) < WriteSize do
   begin
-    //Determines first page buffer size to prevent buffer "rolls over" on address boundary
-    if (StartAddress > 0) and (Address = StartAddress) and (PageSize > 1) then
-       PageSize := (StrToInt(MainForm.ComboChipSize.Text) - StartAddress) mod PageSize else
-           PageSize := PageSizeTemp;
+    //Determines first page buffer size to prevent buffer "rolls over" on address
+    //boundary. The first chunk stops at the next page boundary; every chunk
+    //after it is a whole page. The old formula used the chip size instead of the
+    //offset into the page and returned 0 for a page aligned start address, which
+    //left the loop writing nothing and never advancing Address.
+    if (Address = StartAddress) and (PageSizeTemp > 1) then
+    begin
+      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp);
+      if PageSize = 0 then PageSize := PageSizeTemp;
+    end
+    else
+      PageSize := PageSizeTemp;
 
     if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
 
     RomStream.ReadBuffer(DataChunk, PageSize);
     BytesWrite := BytesWrite + UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
+    //Keep the address of the page being written: Address moves on before the
+    //wait below, so reporting it there named the page after the one that failed.
+    //By Dreg
+    PageAddr := Address;
     Inc(Address, PageSize);
 
+    //Acknowledge polling: the chip stops answering while it programs a page.
+    //A transport failure looks exactly like a busy chip from here, so the wait
+    //is bounded - an EEPROM page write is milliseconds, and without the bound a
+    //broken link spins in this loop until the user notices and cancels.
+    BusyDeadline := GetTickCount64 + 5000;
     while UsbAspI2C_BUSY(DevAddr) do
     begin
       Application.ProcessMessages;
       if UserCancel then Exit;
+      if GetTickCount64 > BusyDeadline then
+      begin
+        LogPrint(STR_I2C_NO_ANSWER + ' @ 0x' + IntToHex(PageAddr, 8));
+        Exit;
+      end;
     end; 
 
     MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
@@ -1702,7 +1948,8 @@ end;
 procedure EraseFlashI2C(StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte);
 var
   DataChunk: array[0..2047] of byte;
-  Address, BytesWrite: cardinal;
+  Address, BytesWrite, PageAddr: cardinal;
+  BusyDeadline: QWord;
 begin
   if (StartAddress >= WriteSize) or (WriteSize = 0) then
   begin
@@ -1722,10 +1969,19 @@ begin
     BytesWrite := BytesWrite + UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
     Inc(Address, PageSize);
 
+    //Bounded for the same reason the write loop is: a link that has died looks
+    //exactly like a chip that is still programming, and an unbounded wait here
+    //spins at full speed logging an error per call until the user gives up.
+    BusyDeadline := GetTickCount64 + 5000;
     while UsbAspI2C_BUSY(DevAddr) do
     begin
       Application.ProcessMessages;
       if UserCancel then Exit;
+      if GetTickCount64 > BusyDeadline then
+      begin
+        LogPrint(STR_I2C_NO_ANSWER + ' @ 0x' + IntToHex(PageAddr, 8));
+        Exit;
+      end;
     end; 
 
     MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
@@ -1743,7 +1999,7 @@ end;
 
 procedure VerifyFlashI2C(var RomStream: TMemoryStream; StartAddress, DataSize: cardinal; ChunkSize: Word; DevAddr: byte);
 var
-  BytesRead, i: integer;
+  BytesRead, Got, i: integer;
   DataChunk: array[0..2047] of byte;
   DataChunkFile: array[0..2047] of byte;
   Address: cardinal;
@@ -1753,6 +2009,14 @@ begin
     LogPrint(STR_CHECK_SETTINGS);
     exit;
   end;
+
+  //The caller passes 65535 unless the user asked for byte at a time reads, so
+  //without a limit from the programmer itself this always asks for the whole
+  //2048 byte buffer. A Bus Pirate v5 or newer refuses any read over 512 and the
+  //verify then fails on its first chunk, on every chip. VerifyFlash25 has taken
+  //its chunk from the back end all along; this one never did.  By Dreg
+  if (ASProgrammer.Current_HW = CHW_BUSPIRATE5) and (BusPirate5Dev <> nil) then
+    if ChunkSize > BusPirate5Dev.MaxRead then ChunkSize := BusPirate5Dev.MaxRead;
 
   if ChunkSize > SizeOf(DataChunk) then ChunkSize := SizeOf(DataChunk);
   if ChunkSize < 1 then ChunkSize := 1;
@@ -1767,7 +2031,18 @@ begin
   begin
     if ChunkSize > (DataSize - (Address - StartAddress)) then ChunkSize := DataSize -(Address - StartAddress) ;
 
-    BytesRead := BytesRead + UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
+    Got := UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
+
+    //Comparing a stale buffer would report a mismatch at the wrong address, or
+    //none at all. Neither is an answer.
+    if Got <> ChunkSize then
+    begin
+      LogPrint(STR_WRONG_BYTES_READ + ' @ 0x' + IntToHex(Address, 8));
+      MainForm.ProgressBar.Position := 0;
+      Exit;
+    end;
+    Inc(BytesRead, Got);
+
     RomStream.ReadBuffer(DataChunkFile, ChunkSize);
 
     for i := 0 to ChunkSize -1 do
@@ -1785,7 +2060,7 @@ begin
     if UserCancel then Break;
   end;
 
-  if (BytesRead <> DataSize) then
+  if (BytesRead <> integer(DataSize)) then
     LogPrint(STR_WRONG_BYTES_READ)
   else
     LogPrint(STR_DONE);
@@ -1795,6 +2070,22 @@ end;
 
 procedure SelectHW(programmer: THardwareList);
 begin
+  //Release the back end being left, but only when the selection really changes:
+  //this is also called while the saved settings are applied at startup. Both
+  //Bus Pirate drivers hold their own serial handle, and on a v5 or newer the
+  //two menus can point at ports of the same physical device, so leaving the
+  //outgoing one open makes the incoming one fail with an access denied that
+  //reads like a driver fault. Disconnecting also parks the pins and drops the
+  //target supply, which is what should happen when the user changes
+  //programmer.  By Dreg
+  if programmer <> AsProgrammer.Current_HW then
+  begin
+    if (AsProgrammer.Current_HW = CHW_BUZZPIRAT) and (BuzzpiratDev <> nil) then
+      BuzzpiratDev.Disconnect;
+    if (AsProgrammer.Current_HW = CHW_BUSPIRATE5) and (BusPirate5Dev <> nil) then
+      BusPirate5Dev.Disconnect;
+  end;
+
   if programmer = CHW_USBASP then
   begin
     MainForm.MenuSPIClock.Visible:= true;
@@ -1853,11 +2144,25 @@ begin
   if programmer = CHW_BUZZPIRAT then
   begin
     MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuCH347SPIClock.Visible:= false;
     MainForm.MenuAVRISPSPIClock.Visible:= false;
     MainForm.MenuArduinoSPIClock.Visible:= false;
     MainForm.MenuFT232SPIClock.Visible:= false;
     MainForm.MenuMicrowire.Enabled:= false;
     AsProgrammer.Current_HW := CHW_BUZZPIRAT;
+  end;
+
+  if programmer = CHW_BUSPIRATE5 then
+  begin
+    MainForm.MenuSPIClock.Visible:= false;
+    MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuAVRISPSPIClock.Visible:= false;
+    MainForm.MenuArduinoSPIClock.Visible:= false;
+    MainForm.MenuFT232SPIClock.Visible:= false;
+    //BPIO2 has no Microwire: its 3-wire handlers are not wired into the
+    //firmware's dispatch table and DataRequest is byte granular anyway.
+    MainForm.MenuMicrowire.Enabled:= false;
+    AsProgrammer.Current_HW := CHW_BUSPIRATE5;
   end;
 
   if programmer = CHW_FT232H then
@@ -1873,8 +2178,79 @@ begin
 
 end;
 
+//Tag of whichever child of a submenu is checked, and its inverse. The
+//BusPirateV5+ clock and supply menus carry their value in Tag, so they need no
+//if-ladder to save or restore.
+function MenuCheckedTag(Parent: TMenuItem; Default: PtrInt): PtrInt;
+var
+  i: integer;
+begin
+  result := Default;
+  if Parent = nil then Exit;
+  for i := 0 to Parent.Count - 1 do
+    if Parent.Items[i].Checked then Exit(Parent.Items[i].Tag);
+end;
+
+procedure MenuCheckByTag(Parent: TMenuItem; Value: PtrInt);
+var
+  i: integer;
+begin
+  if Parent = nil then Exit;
+  for i := 0 to Parent.Count - 1 do
+    if Parent.Items[i].Tag = Value then
+    begin
+      Parent.Items[i].Checked := true;
+      Exit;
+    end;
+end;
+
+//Waits for the chip to finish an erase or a page program. False means the
+//operation has to stop: either the user cancelled, which UserCancel has already
+//logged, or the chip stopped answering, which nothing else would report.
+function WaitChipReady: boolean;
+var
+  linkLost: boolean;
+begin
+  result := UsbAsp25_WaitReady(linkLost);
+  if linkLost then
+    LogPrint('The chip stopped answering while waiting for it to finish - aborted');
+end;
+
+//Everything that can reach the device or the buffer. The flash loops pump the
+//message queue with Application.ProcessMessages, so without this a menu click
+//lands in the middle of a transfer: Disconnect closes the port under a running
+//read, the I2C scanner re-enters the driver, changing the COM port drops the
+//session, and the random fill rewrites the stream the write loop is reading.
+procedure SetOperationMenusEnabled(OnOff: boolean);
+begin
+  MainForm.MenuChip.Enabled := OnOff;
+  MainForm.MenuOptions.Enabled := OnOff;
+  MainForm.MenuItemHardware.Enabled := OnOff;
+  MainForm.MenuBuzzpirat.Enabled := OnOff;
+  MainForm.MenuBP5.Enabled := OnOff;
+  MainForm.MenuHexEditor.Enabled := OnOff;
+  MainForm.ScriptsMenuItem.Enabled := OnOff;
+
+  //The bus radios live next to the toolbar, not on it, so LockControl never
+  //covered them. Their change handlers reset the chip size, the page size and
+  //the address type, which the running transfer is still reading.  By Dreg
+  MainForm.RadioSPI.Enabled := OnOff;
+  MainForm.RadioI2C.Enabled := OnOff;
+  MainForm.RadioMw.Enabled := OnOff;
+
+  //The status register editor and the script editor are modeless, so they stay
+  //clickable while an operation runs, and the flash loops pump the message
+  //queue. A click on "Read SREG" in the middle of an 8 MB write opens the
+  //device, does its own traffic and closes it again underneath the write,
+  //which then fails every remaining page. With "reset on every operation"
+  //ticked it also drops the supply mid page program.  By Dreg
+  if sregedit.sregeditForm <> nil then sregedit.sregeditForm.Enabled := OnOff;
+  if ScriptEditForm <> nil then ScriptEditForm.Enabled := OnOff;
+end;
+
 procedure LockControl;
 begin
+  SetOperationMenusEnabled(false);
   MainForm.ButtonRead.Enabled := False;
   MainForm.ButtonWrite.Enabled := False;
   MainForm.ButtonVerify.Enabled := False;
@@ -1890,6 +2266,7 @@ end;
 
 procedure UnlockControl;
 begin
+  SetOperationMenusEnabled(true);
   MainForm.MPHexEditorEx.Enabled := true;
   MainForm.GroupChipSettings.Enabled := true;
   MainForm.ButtonRead.Enabled := True;
@@ -1951,10 +2328,364 @@ begin
   MainForm.MenuArduinoCOMPort.Caption := 'Arduino COMPort: '+Arduino_COMPort;
 end;
 
-procedure TMainForm.MenuBuzzpiratCOMPortClick(Sender: TObject);
+procedure TMainForm.RefreshCOMPortMenu;
+var
+  ports: TStringList;
+  i, wanted: integer;
+  item: TMenuItem;
+  sig, cur: string;
 begin
-  Buzzpirat_COMPort := InputBox('Buzzpirat / Buspirate COMPort','',Buzzpirat_COMPort);
-  MainForm.MenuBuzzpiratCOMPort.Caption := 'Buzzpirat / Buspirate COMPort: '+Buzzpirat_COMPort;
+  if MenuBuzzpiratCOMPort = nil then Exit;
+
+  ports := TStringList.Create;
+  try
+    //Only what is plugged in right now. A port that is not there cannot be
+    //opened, so listing it would just be one more thing to get wrong.
+    BPGetSerialPorts(ports);
+    cur := Trim(Buzzpirat_COMPort);
+
+    //This runs off a timer, so do nothing at all unless something moved.
+    sig := ports.CommaText + '|' + cur;
+    if sig = FCOMPortMenuSig then Exit;
+    FCOMPortMenuSig := sig;
+
+    //One disabled placeholder when there is nothing to offer.
+    wanted := ports.Count;
+    if wanted = 0 then wanted := 1;
+
+    //Never destroy an item from the timer. A submenu that is open while
+    //this fires is walking the very list being freed, and the surplus is
+    //at most a few entries, so hide it instead. Growing is safe: an item
+    //that appears is not one the menu is already pointing at.  By Dreg
+    while MenuBuzzpiratCOMPort.Count < wanted do
+    begin
+      item := TMenuItem.Create(Self);
+      item.RadioItem := true;
+      item.AutoCheck := false;
+      MenuBuzzpiratCOMPort.Add(item);
+    end;
+
+    for i := 0 to MenuBuzzpiratCOMPort.Count - 1 do
+      MenuBuzzpiratCOMPort.Items[i].Visible := i < wanted;
+
+    if ports.Count = 0 then
+    begin
+      item := MenuBuzzpiratCOMPort.Items[0];
+      item.Caption := STR_DM_NO_SERIAL_PORTS;
+      item.Hint := '';
+      item.Checked := false;
+      item.Enabled := false;
+      item.OnClick := nil;
+    end
+    else
+      for i := 0 to ports.Count - 1 do
+      begin
+        item := MenuBuzzpiratCOMPort.Items[i];
+        item.Caption := ports[i];
+        //The plain port name lives here, so the caption stays free to explain.
+        item.Hint := ports[i];
+        item.Enabled := true;
+        item.Checked := SameText(ports[i], cur);
+        item.OnClick := @BuzzpiratCOMPortItemClick;
+      end;
+
+    if cur = '' then
+      MenuBuzzpiratCOMPort.Caption := STR_DM_COMPORT_NONE
+    else
+      MenuBuzzpiratCOMPort.Caption := STR_DM_COMPORT_PREFIX + cur;
+  finally
+    ports.Free;
+  end;
+end;
+
+procedure TMainForm.BuzzpiratCOMPortItemClick(Sender: TObject);
+var
+  p: string;
+begin
+  p := Trim(TMenuItem(Sender).Hint);
+  if p = '' then Exit;
+  if SameText(p, Trim(Buzzpirat_COMPort)) then Exit;
+
+  //Whatever session is open belongs to the port being left behind.
+  if BuzzpiratDev <> nil then BuzzpiratDev.Disconnect;
+
+  Buzzpirat_COMPort := p;
+  LogPrint('Buzzpirat: COM port set to ' + p);
+  RefreshCOMPortMenu;
+end;
+
+procedure TMainForm.ComPortTimerTimer(Sender: TObject);
+begin
+  //Cheap: a registry read on Windows, and the menus are only rebuilt when the
+  //result differs from what is already on screen.
+  RefreshCOMPortMenu;
+  RefreshBP5PortMenu;
+end;
+
+procedure TMainForm.MenuBuzzpiratDisconnectClick(Sender: TObject);
+begin
+  if BuzzpiratDev = nil then Exit;
+  BuzzpiratDev.Disconnect;
+  LogPrint('Buzzpirat: disconnected, device reset to its user terminal');
+end;
+
+//--- Bus Pirate v5+ -----------------------------------------------------------
+//By Dreg
+//https://github.com/therealdreg/asprogrammer-dregmod
+//Port menu, bus scanner and device report for the BPIO2 back end in
+//buspirate5hw.pas.
+
+procedure TMainForm.RefreshBP5PortMenu;
+var
+  devs: TBP5DeviceArray;
+  ports: TStringList;
+  i, wanted: integer;
+  item: TMenuItem;
+  sig, cur, note: string;
+  isData, isTerm: boolean;
+begin
+  if MenuBP5COMPort = nil then Exit;
+
+  ports := TStringList.Create;
+  try
+    //Every port the machine really has, exactly like the v3.x menu. The
+    //registry is only used to label them, so a machine where that lookup finds
+    //nothing still gets a complete, usable list.
+    //Only what is plugged in right now, same rule as the v3.x menu.
+    BP5GetSerialPorts(ports);
+    devs := BP5EnumerateDevices;
+
+    cur := Trim(BusPirate5_COMPort);
+
+    sig := cur + '|';
+    for i := 0 to ports.Count - 1 do
+    begin
+      BP5DescribePort(devs, ports[i], isData, isTerm);
+      sig := sig + ports[i] + ':' + IntToStr(Ord(isData)) + IntToStr(Ord(isTerm)) + ',';
+    end;
+
+    if sig = FBP5PortMenuSig then Exit;
+    FBP5PortMenuSig := sig;
+
+    wanted := ports.Count;
+    if wanted = 0 then wanted := 1;
+
+    //Never destroy an item from the timer. A submenu that is open while
+    //this fires is walking the very list being freed, and the surplus is
+    //at most a few entries, so hide it instead. Growing is safe: an item
+    //that appears is not one the menu is already pointing at.  By Dreg
+    while MenuBP5COMPort.Count < wanted do
+    begin
+      item := TMenuItem.Create(Self);
+      item.RadioItem := true;
+      item.AutoCheck := false;
+      MenuBP5COMPort.Add(item);
+    end;
+
+    for i := 0 to MenuBP5COMPort.Count - 1 do
+      MenuBP5COMPort.Items[i].Visible := i < wanted;
+
+    if ports.Count = 0 then
+    begin
+      item := MenuBP5COMPort.Items[0];
+      item.Caption := STR_DM_NO_SERIAL_PORTS;
+      item.Hint := '';
+      item.Checked := false;
+      item.Enabled := false;
+      item.OnClick := nil;
+    end
+    else
+      for i := 0 to ports.Count - 1 do
+      begin
+        item := MenuBP5COMPort.Items[i];
+        note := BP5DescribePort(devs, ports[i], isData, isTerm);
+
+        item.Caption := ports[i];
+        if note <> '' then item.Caption := item.Caption + '   (' + note + ')';
+        //The terminal interface answers nothing here, so say so rather than
+        //letting the user pick it and wonder why the handshake times out.
+        if isTerm then item.Caption := item.Caption + STR_DM_NOT_THIS_ONE;
+
+        item.Hint := ports[i];
+        item.Enabled := true;
+        item.Checked := SameText(ports[i], cur);
+        item.OnClick := @BP5COMPortItemClick;
+      end;
+
+    if cur = '' then
+      MenuBP5COMPort.Caption := STR_DM_COMPORT_NONE
+    else
+      MenuBP5COMPort.Caption := STR_DM_COMPORT_PREFIX + cur;
+  finally
+    ports.Free;
+  end;
+end;
+
+procedure TMainForm.BP5COMPortItemClick(Sender: TObject);
+var
+  p: string;
+begin
+  p := Trim(TMenuItem(Sender).Hint);
+  if p = '' then Exit;
+  if SameText(p, Trim(BusPirate5_COMPort)) then Exit;
+
+  if BusPirate5Dev <> nil then BusPirate5Dev.Disconnect;
+  BusPirate5_COMPort := p;
+  LogPrint('BusPirateV5+: COM port set to ' + p);
+  RefreshBP5PortMenu;
+end;
+
+procedure TMainForm.MenuBP5DisconnectClick(Sender: TObject);
+begin
+  if BusPirate5Dev = nil then Exit;
+  BusPirate5Dev.Disconnect;
+  LogPrint('BusPirateV5+: disconnected, device left in HiZ with the supply off');
+end;
+
+procedure TMainForm.MenuBP5InfoClick(Sender: TObject);
+var
+  report: string;
+begin
+  if BusPirate5Dev = nil then Exit;
+
+  Screen.Cursor := crHourGlass;
+  try
+    report := BusPirate5Dev.DeviceReport;
+  finally
+    Screen.Cursor := crDefault;
+  end;
+
+  LogPrint(report);
+  ShowMonospaceReport('Bus Pirate v5+', report);
+end;
+
+procedure TMainForm.MenuBP5HelpClick(Sender: TObject);
+begin
+  ExecuteProcess('cmd.exe', '/c start https://docs.buspirate.com/', []);
+end;
+
+procedure TMainForm.MenuBP5I2CScanClick(Sender: TObject);
+var
+  found: TBytes;
+  err: string;
+  ok: boolean;
+  i: integer;
+  lines: TStringList;
+begin
+  if BusPirate5Dev = nil then Exit;
+
+  Screen.Cursor := crHourGlass;
+  try
+    ok := BusPirate5Dev.ScanI2CBus(found, err);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+
+  if not ok then
+  begin
+    LogPrint('I2C scan failed: ' + err);
+    MessageDlg(STR_DM_I2C_SCAN_TITLE, STR_DM_I2C_SCAN_NO_RUN + LineEnding + LineEnding +
+               err, mtError, [mbOK], 0);
+    Exit;
+  end;
+
+  lines := TStringList.Create;
+  try
+    for i := 0 to High(found) do
+      lines.Add(BusPirate5Dev.I2CDeviceLine(found[i]));
+    ShowI2CScanResult(found, Trim(BusPirate5_COMPort),
+                      BusPirate5Dev.I2CBusDescription, lines);
+  finally
+    lines.Free;
+  end;
+end;
+
+procedure TMainForm.MenuBuzzpiratI2CScanClick(Sender: TObject);
+var
+  found: TBytes;
+  err: string;
+  ok: boolean;
+  i: integer;
+  lines: TStringList;
+begin
+  if BuzzpiratDev = nil then Exit;
+
+  Screen.Cursor := crHourGlass;
+  try
+    ok := BuzzpiratDev.ScanI2CBus(found, err);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+
+  if not ok then
+  begin
+    LogPrint('I2C scan failed: ' + err);
+    MessageDlg(STR_DM_I2C_SCAN_TITLE, STR_DM_I2C_SCAN_NO_RUN + LineEnding + LineEnding +
+               err, mtError, [mbOK], 0);
+    Exit;
+  end;
+
+  lines := TStringList.Create;
+  try
+    for i := 0 to High(found) do
+      lines.Add(BuzzpiratDev.I2CDeviceLine(found[i]));
+    ShowI2CScanResult(found, Trim(Buzzpirat_COMPort),
+                      BuzzpiratDev.I2CBusDescription, lines);
+  finally
+    lines.Free;
+  end;
+end;
+
+procedure TMainForm.MenuHexEditorRandomClick(Sender: TObject);
+const
+  CHUNK = 65536;
+var
+  size, done, take, i: integer;
+  buf: array[0..CHUNK - 1] of byte;
+begin
+  size := MPHexEditorEx.DataSize;
+  //Nothing loaded yet: fill what a Write would accept, so the result can go
+  //straight to the Write button - which is the whole point of the feature.
+  //That is the chip size minus the start address, exactly the bound
+  //ButtonWriteClick checks against.
+  if size <= 0 then
+  begin
+    size := StrToIntDef(ComboChipSize.Text, 0) - Hex2Dec('$' + StartAddressEdit.Text);
+    if size < 0 then size := 0;
+  end;
+  if size <= 0 then
+  begin
+    ShowMessage(STR_DM_FILL_NO_SIZE);
+    Exit;
+  end;
+
+  if MessageDlg(STR_DM_FILL_TITLE,
+       Format('Replace the whole %d byte hexeditor content with random data?' + LineEnding +
+              LineEnding + 'The chip itself is not touched until you press Write.',
+              [size]), mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
+
+  Screen.Cursor := crHourGlass;
+  try
+    RomF.Clear;
+    RomF.Size := size;
+    RomF.Position := 0;
+    done := 0;
+    while done < size do
+    begin
+      take := size - done;
+      if take > CHUNK then take := CHUNK;
+      for i := 0 to take - 1 do buf[i] := byte(Random(256));
+      RomF.WriteBuffer(buf[0], take);
+      Inc(done, take);
+    end;
+    RomF.Position := 0;
+    MPHexEditorEx.LoadFromStream(RomF);
+    RomF.Position := 0;
+  finally
+    Screen.Cursor := crDefault;
+  end;
+
+  LogPrint(Format('Hexeditor filled with %d random bytes - write it, read it back and verify.', [size]));
 end;
 
 procedure TMainForm.MenuCopyToClipClick(Sender: TObject);
@@ -2025,6 +2756,11 @@ begin
   SelectHW(CHW_BUZZPIRAT);
 end;
 
+procedure TMainForm.MenuHWBUSPIRATE5Click(Sender: TObject);
+begin
+  SelectHW(CHW_BUSPIRATE5);
+end;
+
 procedure TMainForm.MenuItemBenchmarkClick(Sender: TObject);
 var
   buffer: array[0..2047] of byte;
@@ -2037,7 +2773,7 @@ begin
   if not OpenDevice() then exit;
   EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
   LockControl();
-
+try
   if (AsProgrammer.Current_HW = CHW_CH341) or (AsProgrammer.Current_HW = CHW_AVRISP) or (AsProgrammer.Current_HW = CHW_CH347)
     or (AsProgrammer.Current_HW = CHW_FT232H) then
     cycles := 256
@@ -2085,10 +2821,11 @@ begin
 
   LogPrint(STR_TIME + TimeToStr(t)+' '+
     IntToStr( Trunc(((cycles*sizeof(buffer)) / timeval) * 1000)) +' bytes/s');
-
+finally
   ExitProgMode25;
   AsProgrammer.Programmer.DevClose;
   UnlockControl();
+end;
 end;
 
 procedure TMainForm.MenuItemEditSregClick(Sender: TObject);
@@ -2118,11 +2855,7 @@ begin
     UsbAsp25_WriteSR(sreg); //Устанавливаем регистр
 
     //Пока отлипнет ромка
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitChipReady then Exit;
 
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
   end;
@@ -2137,11 +2870,7 @@ begin
     UsbAsp95_WriteSR(sreg); //Устанавливаем регистр
 
     //Пока отлипнет ромка
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitChipReady then Exit;
 
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
   end;
@@ -2168,12 +2897,22 @@ begin
 
   if ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
-    UsbAsp25_ReadSR(sreg); //Читаем регистр
-    UsbAsp25_ReadSR(sreg2, $35); //Второй байт
-    UsbAsp25_ReadSR(sreg3, $15); //Третий байт
-    LogPrint('Sreg: '+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+'), ')
-                                         +IntToBin(sreg2, 8)+'(0x'+(IntToHex(sreg2, 2)+'), ')
-                                         +IntToBin(sreg3, 8)+'(0x'+(IntToHex(sreg3, 2)+')'));
+    //Only sreg was initialised, so a chip that does not implement the second
+    //and third status registers, or a read that failed, printed whatever was on
+    //the stack as if the chip had said it. UsbAsp25_ReadSR returns the byte
+    //count and nobody was looking at it.  By Dreg
+    sreg2 := 0;
+    sreg3 := 0;
+    if UsbAsp25_ReadSR(sreg) < 1 then
+      LogPrint(STR_DM_SREG_NO_ANSWER)
+    else
+    begin
+      UsbAsp25_ReadSR(sreg2, $35);
+      UsbAsp25_ReadSR(sreg3, $15);
+      LogPrint('Sreg: '+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+'), ')
+                                           +IntToBin(sreg2, 8)+'(0x'+(IntToHex(sreg2, 2)+'), ')
+                                           +IntToBin(sreg3, 8)+'(0x'+(IntToHex(sreg3, 2)+')'));
+    end;
   end;
 
   if ComboSPICMD.ItemIndex = SPI_CMD_95 then
@@ -2255,17 +2994,17 @@ begin
   begin
     ButtonBlock.Enabled := False;
 
-    SkipFFLabel := MenuSkipFF.Caption;
-    Delete(SkipFFLabel, Length(SkipFFLabel)-1 ,2);
-    MenuSkipFF.Caption := SkipFFLabel + '00';
+    //Built from a placeholder, not by deleting the last two characters of the
+     //caption. That only ever worked because every translation happened to end
+     //in the token; one that put it anywhere else, or spelled it 0xFF, had the
+     //wrong two characters cut off instead.  By Dreg
+    MenuSkipFF.Caption := Format(STR_DM_SKIP_TOKEN, ['00']);
   end
   else
   begin
     ButtonBlock.Enabled := True;
 
-    SkipFFLabel := MenuSkipFF.Caption;
-    Delete(SkipFFLabel, Length(SkipFFLabel)-1 ,2);
-    MenuSkipFF.Caption := SkipFFLabel + 'FF'
+    MenuSkipFF.Caption := Format(STR_DM_SKIP_TOKEN, ['FF'])
   end;
 
   ComboMWBitLen.Visible       := False;
@@ -2287,6 +3026,7 @@ var
   WriteType: byte;
   I2C_DevAddr: byte;
   I2C_ChunkSize: Word = 65535;
+  WasProtected: boolean = false;
 begin
 try
   ButtonCancel.Tag := 0;
@@ -2316,8 +3056,12 @@ try
   if RadioSPI.Checked then
   begin
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
+    //Remember it rather than discarding it. A protected chip takes an erase and
+    //a program without any complaint and keeps what it had, so the run used to
+    //end on "Done" having written nothing. Measured on an SST25VF080B, which
+    //powers up with every block protected.  By Dreg
     if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
-      IsLockBitsEnabled;
+      WasProtected := IsLockBitsEnabled;
     if (not IsNumber(ComboPageSize.Text)) and (UpperCase(ComboPageSize.Text)<>'SSTB') and (UpperCase(ComboPageSize.Text)<>'SSTW') then
     begin
       LogPrint(STR_CHECK_SETTINGS);
@@ -2343,12 +3087,7 @@ try
 
     if IsNumber(ComboPageSize.Text) then
     begin
-      PageSize := StrToInt(ComboPageSize.Text);
-      if PageSize < 1 then
-      begin
-        PageSize := 1;
-        ComboPageSize.Text := '1';
-      end;
+      PageSize := PageSizeFromUI;
       WriteType := WT_PAGE;
     end;
 
@@ -2402,9 +3141,9 @@ try
     MPHexEditorEx.SaveToStream(RomF);
     RomF.Position := 0;
 
-    if StrToInt(ComboPageSize.Text) < 1 then ComboPageSize.Text := '1';
+    PageSizeFromUI;   //clamps the box before every reader below uses it
 
-    WriteFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, StrToInt(ComboPageSize.Text), I2C_DevAddr);
+    WriteFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, PageSizeFromUI, I2C_DevAddr);
 
     if MenuAutoCheck.Checked then
     begin
@@ -2433,7 +3172,7 @@ try
       Exit;
     end;
 
-    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
     TimeCounter := Time();
 
     RomF.Position := 0;
@@ -2454,6 +3193,9 @@ try
   end;
 
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+  //Last thing the reader sees, not buried among the settings at the top.
+  if WasProtected then LogPrint(STR_DM_MAYBE_PROTECTED);
 
 finally
   ExitProgMode25;
@@ -2532,7 +3274,7 @@ try
         LogPrint(STR_CHECK_SETTINGS);
         Exit;
       end;
-      VerifyFlash45(RomF, 0, StrToInt(ComboPageSize.Text), RomF.Size);
+      VerifyFlash45(RomF, 0, PageSizeFromUI, RomF.Size);
     end;
 
 
@@ -2582,7 +3324,7 @@ try
       Exit;
     end;
 
-    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
     TimeCounter := Time();
 
     RomF.Clear;
@@ -2635,11 +3377,7 @@ try
     UsbAsp25_WriteSR(sreg); //Сбрасываем регистр
 
     //Пока отлипнет ромка
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitChipReady then Exit;
 
     UsbAsp25_ReadSR(sreg); //Читаем регистр
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+')'));
@@ -2655,11 +3393,7 @@ try
     UsbAsp95_WriteSR(sreg); //Сбрасываем регистр
 
     //Пока отлипнет ромка
-    while UsbAsp25_Busy() do
-    begin
-      Application.ProcessMessages;
-      if UserCancel then Exit;
-    end;
+    if not WaitChipReady then Exit;
 
     UsbAsp95_ReadSR(sreg); //Читаем регистр
     LogPrint(STR_NEW_SREG+IntToBin(sreg, 8));
@@ -2818,8 +3552,244 @@ begin
 end;
 
 procedure TMainForm.DebugconsoleMenuItemClick(Sender: TObject);
+var
+  report: string;
 begin
-     ExecuteProcess('cmd.exe', '/c start tail -F buzzpirathlp.log', []);
+  if BuzzpiratDev = nil then Exit;
+
+  Screen.Cursor := crHourGlass;
+  try
+    report := BuzzpiratDev.DeviceReport;
+  finally
+    Screen.Cursor := crDefault;
+  end;
+
+  LogPrint(report);
+  ShowMonospaceReport('Buzzpirat / Bus Pirate', report);
+end;
+
+//The run time report windows have no form file, so their buttons share these
+//two handlers and find their partner controls through the parent chain.
+procedure TMainForm.ReportCopyClick(Sender: TObject);
+var
+  dlg: TWinControl;
+  i: integer;
+begin
+  dlg := TControl(Sender).Parent;
+  if dlg = nil then Exit;
+  dlg := dlg.Parent;
+  if dlg = nil then Exit;
+
+  for i := 0 to dlg.ControlCount - 1 do
+    if dlg.Controls[i] is TMemo then
+    begin
+      TMemo(dlg.Controls[i]).SelectAll;
+      TMemo(dlg.Controls[i]).CopyToClipboard;
+      Exit;
+    end;
+end;
+
+procedure TMainForm.ReportListDblClick(Sender: TObject);
+var
+  dlg: TWinControl;
+begin
+  if TListBox(Sender).ItemIndex < 0 then Exit;
+  dlg := TControl(Sender).Parent;
+  if dlg is TCustomForm then TCustomForm(dlg).ModalResult := mrOk;
+end;
+
+procedure ShowMonospaceReport(const ATitle, AText: string);
+var
+  dlg: TForm;
+  memo: TMemo;
+  bar: TPanel;
+  btnCopy, btnClose: TButton;
+begin
+  dlg := TForm.CreateNew(nil);
+  try
+    dlg.Caption := ATitle;
+    dlg.Position := poMainFormCenter;
+    dlg.BorderStyle := bsSizeable;
+    dlg.Width := 560;
+    dlg.Height := 420;
+    dlg.Constraints.MinWidth := 380;
+    dlg.Constraints.MinHeight := 220;
+
+    bar := TPanel.Create(dlg);
+    bar.Parent := dlg;
+    bar.Align := alBottom;
+    bar.Height := 44;
+    bar.BevelOuter := bvNone;
+
+    //alRight stacks right to left in creation order, so Close ends up outermost.
+    btnClose := TButton.Create(dlg);
+    btnClose.Parent := bar;
+    btnClose.Caption := STR_DM_BTN_CLOSE;
+    btnClose.ModalResult := mrOk;
+    btnClose.Default := true;
+    btnClose.Cancel := true;
+    btnClose.Width := 90;
+    btnClose.Align := alRight;
+    btnClose.BorderSpacing.Around := 8;
+
+    btnCopy := TButton.Create(dlg);
+    btnCopy.Parent := bar;
+    btnCopy.Caption := STR_DM_BTN_COPY;
+    btnCopy.Width := 90;
+    btnCopy.Align := alRight;
+    btnCopy.BorderSpacing.Around := 8;
+    btnCopy.OnClick := @MainForm.ReportCopyClick;
+
+    memo := TMemo.Create(dlg);
+    memo.Parent := dlg;
+    memo.Align := alClient;
+    memo.ReadOnly := true;
+    memo.ScrollBars := ssAutoBoth;
+    memo.WordWrap := false;
+    memo.ParentFont := false;
+    //These reports are column aligned; a proportional font would ruin them.
+    memo.Font.Name := 'Courier New';
+    memo.Font.Size := 9;
+    memo.Text := AText;
+
+    dlg.ShowModal;
+  finally
+    dlg.Free;
+  end;
+end;
+
+procedure TMainForm.ApplyI2CAddress(Addr: byte);
+var
+  wr: byte;
+begin
+  //SetI2CDevAddr() rebuilds the write address out of these toggles: bits 1..3
+  //are A0..A2, bits 4..7 the device type nibble, bit 0 is the R/W flag.
+  wr := (Addr shl 1) and $FF;
+  CheckBox_I2C_A0.Checked    := (wr and $02) <> 0;
+  CheckBox_I2C_A1.Checked    := (wr and $04) <> 0;
+  CheckBox_I2C_A2.Checked    := (wr and $08) <> 0;
+  CheckBox_I2C_DevA4.Checked := (wr and $10) <> 0;
+  CheckBox_I2C_DevA5.Checked := (wr and $20) <> 0;
+  CheckBox_I2C_DevA6.Checked := (wr and $40) <> 0;
+  CheckBox_I2C_DevA7.Checked := (wr and $80) <> 0;
+
+  LogPrint(Format('I2C device address set to 7-bit 0x%.2x (write 0x%.2x, read 0x%.2x)',
+                  [Addr, wr, wr or 1]));
+end;
+
+procedure TMainForm.ShowI2CScanResult(const Found: TBytes; const APort,
+  ABusDesc: string; ALines: TStrings);
+var
+  dlg: TForm;
+  memo: TMemo;
+  list: TListBox;
+  bar: TPanel;
+  btnUse, btnCopy, btnClose: TButton;
+  report: string;
+  i: integer;
+begin
+  report := STR_DM_I2C_SCAN_ON + APort + LineEnding +
+            ABusDesc + LineEnding + LineEnding +
+            BPFormatI2CGrid(Found) + LineEnding;
+
+  if Length(Found) = 0 then
+    report := report +
+      'Nothing answered.' + LineEnding + LineEnding +
+      'Worth checking:' + LineEnding +
+      '  - SDA on MOSI, SCL on CLK, and a ground shared with the target' + LineEnding +
+      '  - pull-ups: switch "Pull UPs ON" on, and remember the Bus Pirate' + LineEnding +
+      '    needs its Vpullup pin fed (tie it to 3V3 or 5V)' + LineEnding +
+      '  - target power: "Power ON" drives the 3V3 and 5V rails' + LineEnding +
+      '  - a slower clock (50 kHz or 5 kHz) for long or unterminated wires'
+  else
+  begin
+    report := report + Format(STR_DM_I2C_SCAN_COUNT, [Length(Found)]) + LineEnding;
+    report := report + LineEnding +
+      'Addresses 0x00-0x07 and 0x78-0x7f are reserved by the I2C' + LineEnding +
+      'specification and are never probed. The descriptions below are' + LineEnding +
+      'guesses: I2C addresses are not registered anywhere.';
+  end;
+
+  LogPrint(report);
+
+  dlg := TForm.CreateNew(nil);
+  try
+    dlg.Caption := STR_DM_I2C_SCAN_TITLE;
+    dlg.Position := poMainFormCenter;
+    dlg.BorderStyle := bsSizeable;
+    dlg.Width := 660;
+    dlg.Height := 520;
+    dlg.Constraints.MinWidth := 480;
+    dlg.Constraints.MinHeight := 320;
+
+    bar := TPanel.Create(dlg);
+    bar.Parent := dlg;
+    bar.Align := alBottom;
+    bar.Height := 44;
+    bar.BevelOuter := bvNone;
+
+    btnClose := TButton.Create(dlg);
+    btnClose.Parent := bar;
+    btnClose.Caption := STR_DM_BTN_CLOSE;
+    btnClose.ModalResult := mrCancel;
+    btnClose.Cancel := true;
+    btnClose.Width := 90;
+    btnClose.Align := alRight;
+    btnClose.BorderSpacing.Around := 8;
+
+    btnCopy := TButton.Create(dlg);
+    btnCopy.Parent := bar;
+    btnCopy.Caption := STR_DM_BTN_COPY;
+    btnCopy.Width := 90;
+    btnCopy.Align := alRight;
+    btnCopy.BorderSpacing.Around := 8;
+    btnCopy.OnClick := @ReportCopyClick;
+
+    list := nil;
+    if Length(Found) > 0 then
+    begin
+      btnUse := TButton.Create(dlg);
+      btnUse.Parent := bar;
+      btnUse.Caption := STR_DM_I2C_USE_ADDRESS;
+      btnUse.ModalResult := mrOk;
+      btnUse.Default := true;
+      btnUse.Width := 150;
+      btnUse.Align := alLeft;
+      btnUse.BorderSpacing.Around := 8;
+
+      list := TListBox.Create(dlg);
+      list.Parent := dlg;
+      list.Align := alBottom;
+      list.Height := 120;
+      list.ParentFont := false;
+      list.Font.Name := 'Courier New';
+      list.Font.Size := 9;
+      list.OnDblClick := @ReportListDblClick;
+      for i := 0 to High(Found) do
+        if i < ALines.Count then list.Items.Add(ALines[i]);
+      list.ItemIndex := 0;
+    end;
+
+    memo := TMemo.Create(dlg);
+    memo.Parent := dlg;
+    memo.Align := alClient;
+    memo.ReadOnly := true;
+    memo.ScrollBars := ssAutoBoth;
+    memo.WordWrap := false;
+    memo.ParentFont := false;
+    memo.Font.Name := 'Courier New';
+    memo.Font.Size := 9;
+    memo.Text := report;
+
+    if (dlg.ShowModal = mrOk) and (list <> nil) and (list.ItemIndex >= 0) then
+    begin
+      ApplyI2CAddress(Found[list.ItemIndex]);
+      if not RadioI2C.Checked then
+        ShowMessage(STR_DM_I2C_ADDR_STORED);
+    end;
+  finally
+    dlg.Free;
+  end;
 end;
 
 procedure TMainForm.BzHelpMenuItemClick(Sender: TObject);
@@ -2836,16 +3806,22 @@ begin
   ShowMessage(credits);
 end;
 
-procedure TMainForm.ListcomportsMenuItemClick(Sender: TObject);
-begin
-     ExecuteProcess('cmd.exe', '/c start cmd /k mode', []);
-end;
-
+//Runs a chip script. This is an operation like any other, so it has to behave
+//like one: every other button locks the interface while it works and releases
+//the device afterwards whatever happens. This one did neither, so a script left
+//the port held open, the target still powered, and the toolbar live enough to
+//start a second operation on top of the first.  By Dreg
 procedure TMainForm.SpeedButton1Click(Sender: TObject);
 begin
-  if ComboBox_chip_scriptrun.Items.Capacity < 1 then Exit;;
-  if not OpenDevice() then exit;
-  if RunScriptFromFile(CurrentICParam.Script, ComboBox_chip_scriptrun.Text) then Exit;
+  if ComboBox_chip_scriptrun.Items.Capacity < 1 then Exit;
+  if not OpenDevice() then Exit;
+  try
+    LockControl();
+    RunScriptFromFile(CurrentICParam.Script, ComboBox_chip_scriptrun.Text);
+  finally
+    AsProgrammer.Programmer.DevClose;
+    UnlockControl();
+  end;
 end;
 
 procedure TMainForm.StartAddressEditChange(Sender: TObject);
@@ -2909,16 +3885,28 @@ end;
 
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
+  //Without this the "random" buffer would be the same bytes on every run,
+  //which is exactly what a write/read-back test must not be.
+  Randomize;
+
+  //So spi25 can break out of a busy wait without knowing about the GUI.
+  UsbAsp25_OnCancel := @UserCancel;
+
   AsProgrammer := TAsProgrammer.Create;
   AsProgrammer.AddHW(TUsbAspHardware.Create);
   AsProgrammer.AddHW(TCH341Hardware.Create);
   AsProgrammer.AddHW(TAvrispHardware.Create);
   AsProgrammer.AddHW(TArduinoHardware.Create);
-  AsProgrammer.AddHW(TBuzzpiratHardware.Create);
+  BuzzpiratDev := TBuzzpiratHardware.Create;
+  AsProgrammer.AddHW(BuzzpiratDev);
+  BusPirate5Dev := TBusPirate5Hardware.Create;
+  AsProgrammer.AddHW(BusPirate5Dev);
   AsProgrammer.AddHW(TFT232HHardware.Create);
   AsProgrammer.AddHW(TCH347Hardware.Create);
 
-  SelectHW(CHW_BUZZPIRAT); // dreg's dirty hack
+  //This fork is built around the Bus Pirate, so that is what a fresh install
+  //starts on. A settings.xml, if there is one, overrides it further down.
+  SelectHW(CHW_BUZZPIRAT);
 
   LoadChipList(ChipListFile);
   RomF := TMemoryStream.Create;
@@ -2929,11 +3917,22 @@ begin
   MPHexEditorEx.InsertMode := false;
   LoadOptions(SettingsFile);
   LoadLangList();
+
+  //Fill the COM port menus once now; the timer keeps them in step with
+  //whatever gets plugged in or unplugged afterwards.
+  RefreshCOMPortMenu;
+  RefreshBP5PortMenu;
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);
 begin
+  //The timer walks the menu tree; stop it before any of that is freed.
+  ComPortTimer.Enabled := false;
+
   AsProgrammer.Free;
+  //Owned by the list AsProgrammer just freed.
+  BuzzpiratDev := nil;
+  BusPirate5Dev := nil;
   MainForm.MPHexEditorEx.Free;
   RomF.Free;
   SaveOptions(SettingsFile);
@@ -2983,7 +3982,7 @@ try
         LogPrint(STR_CHECK_SETTINGS);
         Exit;
       end;
-      ReadFlash45(RomF, 0, StrToInt(ComboPageSize.Text), StrToInt(ComboChipSize.Text));
+      ReadFlash45(RomF, 0, PageSizeFromUI, StrToInt(ComboChipSize.Text));
     end;
 
     if  ComboSPICMD.ItemIndex = SPI_CMD_95 then
@@ -3081,6 +4080,7 @@ end;
 procedure TMainForm.ButtonEraseClick(Sender: TObject);
 var
   I2C_DevAddr: byte;
+  WasProtected: boolean = false;
 begin
 try
   ButtonCancel.Tag := 0;
@@ -3099,7 +4099,7 @@ try
   begin
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
     if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
-      IsLockBitsEnabled;
+      WasProtected := IsLockBitsEnabled;
     TimeCounter := Time();
 
     LogPrint(STR_ERASING_FLASH);
@@ -3119,7 +4119,7 @@ try
         Exit;
       end;
 
-      EraseFlashKB(StrToInt(ComboChipSize.Text), StrToInt(ComboPageSize.Text));
+      EraseFlashKB(StrToInt(ComboChipSize.Text), PageSizeFromUI);
     end;
 
     if ComboSPICMD.ItemIndex = SPI_CMD_25 then
@@ -3133,11 +4133,7 @@ try
 
       LogPrint(STR_ERASE_NOTICE);
 
-      while UsbAsp25_Busy() do
-      begin
-        Application.ProcessMessages;
-        if UserCancel then Exit;
-      end;
+      if not WaitChipReady then Exit;
 
       ProgressBar.Style:= pbstNormal;
       ProgressBar.Position:= 0;
@@ -3151,7 +4147,7 @@ try
           Exit;
         end;
 
-      EraseEEPROM25(0, StrToInt(ComboChipSize.Text), StrToInt(ComboPageSize.Text), StrToInt(ComboChipSize.Text));
+      EraseEEPROM25(0, StrToInt(ComboChipSize.Text), PageSizeFromUI, StrToInt(ComboChipSize.Text));
     end;
 
     if ComboSPICMD.ItemIndex = SPI_CMD_45 then
@@ -3189,9 +4185,7 @@ try
 
     TimeCounter := Time();
 
-    if StrToInt(ComboPageSize.Text) < 1 then ComboPageSize.Text := '1';
-
-    EraseFlashI2C(0, StrToInt(ComboChipSize.Text), StrToInt(ComboPageSize.Text), I2C_DevAddr);
+    EraseFlashI2C(0, StrToInt(ComboChipSize.Text), PageSizeFromUI, I2C_DevAddr);
   end;
 
   //Microwire
@@ -3203,7 +4197,7 @@ try
       Exit;
     end;
 
-    AsProgrammer.Programmer.MWInit(SetSPISpeed(0));
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
     TimeCounter := Time();
     LogPrint(STR_ERASING_FLASH);
     UsbAspMW_Ewen(StrToInt(ComboMWBitLen.Text));
@@ -3220,6 +4214,9 @@ try
 
   LogPrint(STR_DONE);
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+
+  //Last thing the reader sees, not buried among the settings at the top.
+  if WasProtected then LogPrint(STR_DM_MAYBE_PROTECTED);
 
 finally
   ExitProgMode25;
@@ -3318,11 +4315,103 @@ begin
       TDOMElement(ParentNode).SetAttribute('hw', 'arduino');
     if MainForm.MenuHWBUZZPIRAT.Checked then
       TDOMElement(ParentNode).SetAttribute('hw', 'buzzpirat');
+    if MainForm.MenuHWBUSPIRATE5.Checked then
+      TDOMElement(ParentNode).SetAttribute('hw', 'buspirate5');
     if MainForm.MenuHWFT232H.Checked then
       TDOMElement(ParentNode).SetAttribute('hw', 'ft232h');
 
     TDOMElement(ParentNode).SetAttribute('arduino_comport', Arduino_COMPort);
     TDOMElement(ParentNode).SetAttribute('arduino_baudrate', IntToStr(Arduino_BaudRate));
+
+    TDOMElement(ParentNode).SetAttribute('buzzpirat_comport', Buzzpirat_COMPort);
+
+    if MainForm.MenuBuzzpiratSerial2M.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_serial_speed', '2000000');
+    if MainForm.MenuBuzzpiratSerial1M.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_serial_speed', '1000000');
+    if MainForm.MenuBuzzpiratSerial250000.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_serial_speed', '250000');
+    if MainForm.MenuBuzzpiratSerial230400.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_serial_speed', '230400');
+    if MainForm.MenuBuzzpiratSerial115200.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_serial_speed', '115200');
+
+    TDOMElement(ParentNode).SetAttribute('buspirate5_comport', BusPirate5_COMPort);
+    TDOMElement(ParentNode).SetAttribute('buspirate5_spi_hz',
+      IntToStr(MenuCheckedTag(MainForm.MenuBP5SPIClock, 125000)));
+    TDOMElement(ParentNode).SetAttribute('buspirate5_i2c_hz',
+      IntToStr(MenuCheckedTag(MainForm.MenuBP5I2CClock, 50000)));
+    TDOMElement(ParentNode).SetAttribute('buspirate5_mv',
+      IntToStr(MenuCheckedTag(MainForm.MenuBP5Voltage, 3300)));
+    TDOMElement(ParentNode).SetAttribute('buspirate5_ma',
+      IntToStr(MenuCheckedTag(MainForm.MenuBP5Current, 300)));
+    if MainForm.MenuBP5Power.Checked then
+      TDOMElement(ParentNode).SetAttribute('buspirate5_power', '1')
+    else
+      TDOMElement(ParentNode).SetAttribute('buspirate5_power', '0');
+    if MainForm.MenuBP5Pullups.Checked then
+      TDOMElement(ParentNode).SetAttribute('buspirate5_pullups', '1')
+    else
+      TDOMElement(ParentNode).SetAttribute('buspirate5_pullups', '0');
+    if MainForm.MenuBP5Verbose.Checked then
+      TDOMElement(ParentNode).SetAttribute('buspirate5_verbose', '1')
+    else
+      TDOMElement(ParentNode).SetAttribute('buspirate5_verbose', '0');
+    if MainForm.MenuBP5ResetEach.Checked then
+      TDOMElement(ParentNode).SetAttribute('buspirate5_reseteach', '1')
+    else
+      TDOMElement(ParentNode).SetAttribute('buspirate5_reseteach', '0');
+
+    if MainForm.MenuBuzzpiratSPI8MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_spi_speed', '8Mhz');
+    if MainForm.MenuBuzzpiratSPI4MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_spi_speed', '4Mhz');
+    if MainForm.MenuBuzzpiratSPI2P6MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_spi_speed', '2_6Mhz');
+    if MainForm.MenuBuzzpiratSPI2MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_spi_speed', '2Mhz');
+    if MainForm.MenuBuzzpiratSPI1MHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_spi_speed', '1Mhz');
+    if MainForm.MenuBuzzpiratSPI250KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_spi_speed', '250Khz');
+    if MainForm.MenuBuzzpiratSPI125KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_spi_speed', '125Khz');
+    if MainForm.MenuBuzzpiratSPI30KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_spi_speed', '30Khz');
+
+    if MainForm.MenuBuzzpiratI2C400KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_i2c_speed', '400Khz');
+    if MainForm.MenuBuzzpiratI2C100KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_i2c_speed', '100Khz');
+    if MainForm.MenuBuzzpiratI2C50KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_i2c_speed', '50Khz');
+    if MainForm.MenuBuzzpiratI2C5KHz.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_i2c_speed', '5Khz');
+
+    if MainForm.MenuBuzzpiratSPINormal.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_output', '3v3')
+    else
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_output', 'hiz');
+
+    if MainForm.MenuBuzzpiratPower.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_power', '1')
+    else
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_power', '0');
+
+    if MainForm.MenuBuzzpiratPullups.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_pullups', '1')
+    else
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_pullups', '0');
+
+    if MainForm.MenuBuzzpiratResetEach.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_reset_each', '1')
+    else
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_reset_each', '0');
+
+    if MainForm.MenuBuzzpiratVerbose.Checked then
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_verbose', '1')
+    else
+      TDOMElement(ParentNode).SetAttribute('buzzpirat_verbose', '0');
 
     Node.Appendchild(parentNode);
 
@@ -3439,6 +4528,12 @@ begin
           SelectHW(CHW_BUZZPIRAT);
         end;
 
+        if OptVal = 'buspirate5' then
+        begin
+          MainForm.MenuHWBUSPIRATE5.Checked := true;
+          SelectHW(CHW_BUSPIRATE5);
+        end;
+
         if OptVal = 'ft232h' then
         begin
           MainForm.MenuHWFT232H.Checked := true;
@@ -3455,6 +4550,105 @@ begin
         Arduino_COMPort := OptVal;
         MainForm.MenuArduinoCOMPort.Caption := 'Arduino COMPort: '+ Arduino_COMPort;
       end;
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_comport') <> nil then
+      begin
+        Buzzpirat_COMPort := Trim(UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_comport').NodeValue));
+        MainForm.RefreshCOMPortMenu;
+      end;
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_serial_speed') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_serial_speed').NodeValue);
+        if OptVal = '2000000' then MainForm.MenuBuzzpiratSerial2M.Checked := true;
+        if OptVal = '1000000' then MainForm.MenuBuzzpiratSerial1M.Checked := true;
+        if OptVal = '250000' then MainForm.MenuBuzzpiratSerial250000.Checked := true;
+        if OptVal = '230400' then MainForm.MenuBuzzpiratSerial230400.Checked := true;
+        if OptVal = '115200' then MainForm.MenuBuzzpiratSerial115200.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('buspirate5_comport') <> nil then
+      begin
+        BusPirate5_COMPort := Trim(UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_comport').NodeValue));
+        MainForm.RefreshBP5PortMenu;
+      end;
+      if  Node.Attributes.GetNamedItem('buspirate5_spi_hz') <> nil then
+        MenuCheckByTag(MainForm.MenuBP5SPIClock,
+          StrToIntDef(UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_spi_hz').NodeValue), 125000));
+      if  Node.Attributes.GetNamedItem('buspirate5_i2c_hz') <> nil then
+        MenuCheckByTag(MainForm.MenuBP5I2CClock,
+          StrToIntDef(UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_i2c_hz').NodeValue), 50000));
+      if  Node.Attributes.GetNamedItem('buspirate5_mv') <> nil then
+        MenuCheckByTag(MainForm.MenuBP5Voltage,
+          StrToIntDef(UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_mv').NodeValue), 3300));
+      if  Node.Attributes.GetNamedItem('buspirate5_ma') <> nil then
+        MenuCheckByTag(MainForm.MenuBP5Current,
+          StrToIntDef(UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_ma').NodeValue), 300));
+      if  Node.Attributes.GetNamedItem('buspirate5_power') <> nil then
+        MainForm.MenuBP5Power.Checked :=
+          UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_power').NodeValue) = '1';
+      if  Node.Attributes.GetNamedItem('buspirate5_pullups') <> nil then
+        MainForm.MenuBP5Pullups.Checked :=
+          UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_pullups').NodeValue) = '1';
+      if  Node.Attributes.GetNamedItem('buspirate5_verbose') <> nil then
+        MainForm.MenuBP5Verbose.Checked :=
+          UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_verbose').NodeValue) = '1';
+      if  Node.Attributes.GetNamedItem('buspirate5_reseteach') <> nil then
+        MainForm.MenuBP5ResetEach.Checked :=
+          UTF16ToUTF8(Node.Attributes.GetNamedItem('buspirate5_reseteach').NodeValue) = '1';
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_spi_speed') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_spi_speed').NodeValue);
+
+        if OptVal = '8Mhz' then MainForm.MenuBuzzpiratSPI8MHz.Checked := true;
+        //Dropped from the menu: fall back to the nearest clock still offered.
+        if OptVal = '5_3Mhz' then MainForm.MenuBuzzpiratSPI4MHz.Checked := true;
+        if OptVal = '4Mhz' then MainForm.MenuBuzzpiratSPI4MHz.Checked := true;
+        if OptVal = '3_2Mhz' then MainForm.MenuBuzzpiratSPI2P6MHz.Checked := true;
+        if OptVal = '2_6Mhz' then MainForm.MenuBuzzpiratSPI2P6MHz.Checked := true;
+        if OptVal = '2Mhz' then MainForm.MenuBuzzpiratSPI2MHz.Checked := true;
+        if OptVal = '1_3Mhz' then MainForm.MenuBuzzpiratSPI1MHz.Checked := true;
+        if OptVal = '1Mhz' then MainForm.MenuBuzzpiratSPI1MHz.Checked := true;
+        if OptVal = '250Khz' then MainForm.MenuBuzzpiratSPI250KHz.Checked := true;
+        if OptVal = '125Khz' then MainForm.MenuBuzzpiratSPI125KHz.Checked := true;
+        if OptVal = '50Khz' then MainForm.MenuBuzzpiratSPI30KHz.Checked := true;
+        if OptVal = '30Khz' then MainForm.MenuBuzzpiratSPI30KHz.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_i2c_speed') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_i2c_speed').NodeValue);
+
+        if OptVal = '400Khz' then MainForm.MenuBuzzpiratI2C400KHz.Checked := true;
+        if OptVal = '100Khz' then MainForm.MenuBuzzpiratI2C100KHz.Checked := true;
+        if OptVal = '50Khz' then MainForm.MenuBuzzpiratI2C50KHz.Checked := true;
+        if OptVal = '5Khz' then MainForm.MenuBuzzpiratI2C5KHz.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_output') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_output').NodeValue);
+
+        MainForm.MenuBuzzpiratSPINormal.Checked := OptVal = '3v3';
+        MainForm.MenuBuzzpiratSPIHiz.Checked := OptVal <> '3v3';
+      end;
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_power') <> nil then
+        MainForm.MenuBuzzpiratPower.Checked :=
+          UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_power').NodeValue) = '1';
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_pullups') <> nil then
+        MainForm.MenuBuzzpiratPullups.Checked :=
+          UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_pullups').NodeValue) = '1';
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_reset_each') <> nil then
+        MainForm.MenuBuzzpiratResetEach.Checked :=
+          UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_reset_each').NodeValue) = '1';
+
+      if  Node.Attributes.GetNamedItem('buzzpirat_verbose') <> nil then
+        MainForm.MenuBuzzpiratVerbose.Checked :=
+          UTF16ToUTF8(Node.Attributes.GetNamedItem('buzzpirat_verbose').NodeValue) = '1';
 
       if  Node.Attributes.GetNamedItem('arduino_baudrate') <> nil then
       begin
