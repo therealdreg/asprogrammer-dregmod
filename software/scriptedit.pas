@@ -49,7 +49,7 @@ var
 
 implementation
 
-uses main;
+uses main, spi25;
 
 var
   CurrentSectionName: string;
@@ -112,7 +112,7 @@ begin
     end
     else
     begin
-      SaveDialog.InitialDir:= GetCurrentDir+DirectorySeparator+ScriptsPath;
+      SaveDialog.InitialDir:= ScriptsPath;
       if SaveDialog.Execute then
       begin
         SynEdit.Lines.SaveToFile(SaveDialog.FileName);
@@ -142,7 +142,7 @@ end;
 
 procedure TScriptEditForm.MenuItemOpenClick(Sender: TObject);
 begin
-  OpenDialog.InitialDir:= GetCurrentDir+DirectorySeparator+ScriptsPath;
+  OpenDialog.InitialDir:= ScriptsPath;
   if OpenDialog.Execute then
   begin
     SynEdit.Lines.LoadFromFile(OpenDialog.FileName);
@@ -153,7 +153,7 @@ end;
 
 procedure TScriptEditForm.MenuItemSaveAsClick(Sender: TObject);
 begin
-  SaveDialog.InitialDir:= GetCurrentDir+DirectorySeparator+ScriptsPath;
+  SaveDialog.InitialDir:= ScriptsPath;
   if SaveDialog.Execute then
   begin
     SynEdit.Lines.SaveToFile(SaveDialog.FileName);
@@ -198,7 +198,17 @@ begin
     if ParseScriptText(SynEdit.Lines, CurrentSectionName, ScriptText) then
     begin
       ScriptLogPrint(STR_SCRIPT_RUN_SECTION+CurrentSectionName);
-      RunScript(ScriptText);
+      //Same as the script button of the main window: lock the interface while
+      //the script talks to the device, and release the device afterwards
+      //whatever the script did.  By Dreg
+      LockControl;
+      try
+        RunScript(ScriptText);
+      finally
+        ExitProgMode25;
+        AsProgrammer.Programmer.DevClose;
+        UnlockControl;
+      end;
     end
     else
       if CurrentSectionName = '' then

@@ -4,7 +4,7 @@ object MainForm: TMainForm
   Top = 209
   Width = 853
   ActiveControl = RadioSPI
-  Caption = 'AsProgrammer dregmod v5'
+  Caption = 'AsProgrammer dregmod v7'
   ClientHeight = 541
   ClientWidth = 853
   Constraints.MinHeight = 300
@@ -699,7 +699,7 @@ object MainForm: TMainForm
     Width = 853
     Align = alBottom
     Lines.Strings = (
-      'AsProgrammer dregmod v5'
+      'AsProgrammer dregmod v7'
       'https://github.com/therealdreg/asprogrammer-dregmod'
       'dreg@rootkit.es'
     )
@@ -989,7 +989,6 @@ object MainForm: TMainForm
     object MenuItemHardware: TMenuItem
 	  Caption = 'Программатор'
       object MenuHWBUZZPIRAT: TMenuItem
-	    Checked = True
         AutoCheck = True
         Caption = 'Buzzpirat / BusPirateV3'
         RadioItem = True
@@ -998,6 +997,7 @@ object MainForm: TMainForm
       object MenuHWBUSPIRATE5: TMenuItem
         AutoCheck = True
         Caption = 'BusPirateV5+'
+        Checked = True
         RadioItem = True
         OnClick = MenuHWBUSPIRATE5Click
       end
@@ -1215,6 +1215,12 @@ object MainForm: TMainForm
 		end
 		object MenuBP5Voltage: TMenuItem
 		  Caption = 'Voltage'
+			  object MenuBP5V1V2: TMenuItem
+				AutoCheck = True
+				Caption = '1.2 V'
+				Tag = 1200
+				RadioItem = True
+			  end
 			  object MenuBP5V1V8: TMenuItem
 				AutoCheck = True
 				Caption = '1.8 V'
@@ -1370,6 +1376,10 @@ object MainForm: TMainForm
 				RadioItem = True
 			  end
 		  end
+		end
+		object MenuBP5Labels: TMenuItem
+		  Caption = 'Show pin labels'
+		  OnClick = MenuBP5LabelsClick
 		end
 		object MenuBP5Disconnect: TMenuItem
 		  Caption = 'Disconnect (HiZ, supply off)'

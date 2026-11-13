@@ -8,8 +8,8 @@ uses
   Classes, Forms, SysUtils, utilfunc;
 
 type
-  //Lets a long wait be interrupted without this unit having to know about the
-  //GUI. nil means nothing ever cancels.
+  //Lets a long wait be cancelled; main.pas sets it to UserCancel. nil means
+  //nothing ever cancels.
   TUsbAspCancelQuery = function: boolean;
 
 var
@@ -32,8 +32,8 @@ type
 
 function UsbAsp25_Busy(): boolean;
 //Waits until the chip reports that its erase or program cycle has finished.
-//False means it never did: LinkLost tells the two cases apart - the status
-//register could not be read at all, or the cancel query said stop.
+//False means it never did: LinkLost tells the two cases apart (three status
+//reads in a row failed, or the cancel query said stop).
 function UsbAsp25_WaitReady(out LinkLost: boolean): boolean;
 
 function EnterProgMode25(spiSpeed: integer; SendAB: boolean = false): boolean;
@@ -82,25 +82,36 @@ end;
 function UsbAsp25_WaitReady(out LinkLost: boolean): boolean;
 var
   sreg: byte;
+  failed: integer;
 begin
   LinkLost := false;
+  failed := 0;
   repeat
     sreg := $FF;
 
-    //A status read that fails is a link failure, not an answer. Reporting
-    //"ready" here would be the worst of both worlds: an erase or a page
-    //program would carry on against a chip that is still mid cycle, the writes
-    //would be discarded, and the operation would finish with "Done". Reporting
-    //"busy" - which is what a bare UsbAsp25_Busy does, since sreg keeps its
-    //$FF - spins here for ever on a link that is never going to answer. So
-    //stop, and hand the caller something it can report.
+    //A failed status read is a link failure: it says nothing about the chip.
+    //Taking it as "ready" would let an erase or a page program carry on against
+    //a chip still mid cycle: the writes would be discarded and the operation
+    //would finish with "Done". Taking it as "busy", as UsbAsp25_Busy does (sreg
+    //keeps its $FF), spins for ever on a link that will never answer. So the
+    //wait stops after three failures in a row and sets LinkLost for the caller
+    //to report. One timeout on an Arduino or AVRISP link during a long chip
+    //erase is not a lost link. The Bus Pirate drivers refuse every read after
+    //a timeout until the link is re-armed, so there the three come at once.
     if UsbAsp25_ReadSR(sreg) < 1 then
     begin
-      LinkLost := true;
-      Exit(false);
+      Inc(failed);
+      if failed >= 3 then
+      begin
+        LinkLost := true;
+        Exit(false);
+      end;
+    end
+    else
+    begin
+      failed := 0;
+      if not IsBitSet(sreg, 0) then Exit(true);
     end;
-
-    if not IsBitSet(sreg, 0) then Exit(true);
 
     Application.ProcessMessages;
     if Assigned(UsbAsp25_OnCancel) and UsbAsp25_OnCancel() then Exit(false);
@@ -300,6 +311,22 @@ begin
   result := SPIWrite(1, 3, buff)-1;
 end;
 
+//Spansion and Cypress parts (JEDEC 01h) get four byte addresses through their
+//bank register, written with 17h, and ISSI parts (9Dh) have a bank address
+//register too. Macronix uses 17h for WRFBR, which programs its non-volatile
+//fast boot register and takes 4 data bytes (MX25L12835F datasheet, 9-19), so
+//the opcode goes only to those two vendors.  By Dreg
+function UsesBankRegister: boolean;
+var
+  id: array[0..2] of byte = ($FF, $FF, $FF);
+  op: byte;
+begin
+  op := $9F;
+  SPIWrite(0, 1, op);
+  SPIRead(1, 3, id);
+  result := (id[0] = $01) or (id[0] = $9D);
+end;
+
 //Enter 4-byte mode
 function UsbAsp25_EN4B(): integer;
 var
@@ -309,10 +336,13 @@ begin
   buff:= $B7;
   result := SPIWrite(1, 1, buff);
   //Access Spansion Bank Register to enable Extended address control bit (EXTADD) for 4-byte addressing
-  buff:= $17;
-  SPIWrite(0, 1, buff);
-  buff:= %10000000; //EXTADD=1
-  result := SPIWrite(1, 1, buff);
+  if UsesBankRegister then
+  begin
+    buff:= $17;
+    SPIWrite(0, 1, buff);
+    buff:= %10000000; //EXTADD=1
+    result := SPIWrite(1, 1, buff);
+  end;
 end;
 
 //Exit 4-byte mode
@@ -328,10 +358,13 @@ begin
   //the chip latched in four byte mode. Every later operation that legitimately
   //picks three byte addressing then talks to the wrong address, and nothing
   //short of a power cycle clears it.  By Dreg
-  buff:= $17;
-  SPIWrite(0, 1, buff);
-  buff:= %00000000; //EXTADD=0
-  result := SPIWrite(1, 1, buff);
+  if UsesBankRegister then
+  begin
+    buff:= $17;
+    SPIWrite(0, 1, buff);
+    buff:= %00000000; //EXTADD=0
+    result := SPIWrite(1, 1, buff);
+  end;
 end;
 
 function SPIRead(CS: byte; BufferLen: integer; out buffer: array of byte): integer;

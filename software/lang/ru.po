@@ -202,14 +202,17 @@ msgid "Начальный адрес"
 msgstr "Начальный адрес"
 
 #: tmainform.menuspi.caption
+msgctxt "tmainform.menuspi.caption"
 msgid "SPI"
 msgstr ""
 
 #: tmainform.menuch347spiclock.caption
+msgctxt "tmainform.menuch347spiclock.caption"
 msgid "Частота"
 msgstr ""
 
 #: tmainform.menuarduinospiclock.caption
+msgctxt "tmainform.menuarduinospiclock.caption"
 msgid "Частота"
 msgstr ""
 
@@ -218,10 +221,12 @@ msgid "32 kHz (soft)"
 msgstr ""
 
 #: tmainform.menuavrispspiclock.caption
+msgctxt "tmainform.menuavrispspiclock.caption"
 msgid "Частота"
 msgstr ""
 
 #: tmainform.menuft232spiclock.caption
+msgctxt "tmainform.menuft232spiclock.caption"
 msgid "Частота"
 msgstr ""
 
@@ -238,10 +243,12 @@ msgid "Arduino COMPort:"
 msgstr ""
 
 #: tmainform.menuhwbuzzpirat.caption
+msgctxt "tmainform.menuhwbuzzpirat.caption"
 msgid "Buzzpirat / BusPirateV3"
 msgstr ""
 
 #: tmainform.menuhwbuspirate5.caption
+msgctxt "tmainform.menuhwbuspirate5.caption"
 msgid "BusPirateV5+"
 msgstr ""
 
@@ -274,10 +281,12 @@ msgid "Language"
 msgstr ""
 
 #: tmainform.menubuzzpirat.caption
+msgctxt "tmainform.menubuzzpirat.caption"
 msgid "Buzzpirat / BusPirateV3"
 msgstr ""
 
 #: tmainform.menubuzzpiratcomport.caption
+msgctxt "tmainform.menubuzzpiratcomport.caption"
 msgid "COM port: none selected"
 msgstr ""
 
@@ -306,14 +315,17 @@ msgid "2 Mbaud (exact, fastest)"
 msgstr ""
 
 #: tmainform.menubuzzpiratpullups.caption
+msgctxt "tmainform.menubuzzpiratpullups.caption"
 msgid "Pull UPs ON"
 msgstr ""
 
 #: tmainform.menubuzzpiratpower.caption
+msgctxt "tmainform.menubuzzpiratpower.caption"
 msgid "Power ON"
 msgstr ""
 
 #: tmainform.menubuzzpiratverbose.caption
+msgctxt "tmainform.menubuzzpiratverbose.caption"
 msgid "Verbose log"
 msgstr ""
 
@@ -322,10 +334,12 @@ msgid "Reset device on every operation (slow)"
 msgstr ""
 
 #: tmainform.menubuzzpiratsubi2c.caption
+msgctxt "tmainform.menubuzzpiratsubi2c.caption"
 msgid "I2C"
 msgstr ""
 
 #: tmainform.menubuzzpirati2cclock.caption
+msgctxt "tmainform.menubuzzpirati2cclock.caption"
 msgid "Clock"
 msgstr ""
 
@@ -334,10 +348,12 @@ msgid "400 KHz (not recommended)"
 msgstr ""
 
 #: tmainform.menubuzzpirati2cscan.caption
+msgctxt "tmainform.menubuzzpirati2cscan.caption"
 msgid "Scan the I2C bus..."
 msgstr ""
 
 #: tmainform.menubuzzpiratsubspi.caption
+msgctxt "tmainform.menubuzzpiratsubspi.caption"
 msgid "SPI"
 msgstr ""
 
@@ -350,6 +366,7 @@ msgid "Output Open drain (H=Hi-Z) (buzzif check)"
 msgstr ""
 
 #: tmainform.menubuzzpiratspiclock.caption
+msgctxt "tmainform.menubuzzpiratspiclock.caption"
 msgid "Clock"
 msgstr ""
 
@@ -362,6 +379,7 @@ msgid "Disconnect and reset device"
 msgstr ""
 
 #: tmainform.debugconsolemenuitem.caption
+msgctxt "tmainform.debugconsolemenuitem.caption"
 msgid "Device info / voltages"
 msgstr ""
 
@@ -370,18 +388,22 @@ msgid "Hexeditor"
 msgstr ""
 
 #: tmainform.menuhexeditorrandom.caption
+msgctxt "tmainform.menuhexeditorrandom.caption"
 msgid "Fill with random data"
 msgstr ""
 
 #: tmainform.menubp5.caption
+msgctxt "tmainform.menubp5.caption"
 msgid "BusPirateV5+"
 msgstr ""
 
 #: tmainform.menubp5comport.caption
+msgctxt "tmainform.menubp5comport.caption"
 msgid "COM port: none selected"
 msgstr ""
 
 #: tmainform.menubp5power.caption
+msgctxt "tmainform.menubp5power.caption"
 msgid "Power ON"
 msgstr ""
 
@@ -398,10 +420,12 @@ msgid "unlimited"
 msgstr ""
 
 #: tmainform.menubp5pullups.caption
+msgctxt "tmainform.menubp5pullups.caption"
 msgid "Pull UPs ON"
 msgstr ""
 
 #: tmainform.menubp5verbose.caption
+msgctxt "tmainform.menubp5verbose.caption"
 msgid "Verbose log"
 msgstr ""
 
@@ -410,23 +434,32 @@ msgid "Reconnect on every operation (slow)"
 msgstr ""
 
 #: tmainform.menubp5subi2c.caption
+msgctxt "tmainform.menubp5subi2c.caption"
 msgid "I2C"
 msgstr ""
 
 #: tmainform.menubp5i2cclock.caption
+msgctxt "tmainform.menubp5i2cclock.caption"
 msgid "Clock"
 msgstr ""
 
 #: tmainform.menubp5i2cscan.caption
+msgctxt "tmainform.menubp5i2cscan.caption"
 msgid "Scan the I2C bus..."
 msgstr ""
 
 #: tmainform.menubp5subspi.caption
+msgctxt "tmainform.menubp5subspi.caption"
 msgid "SPI"
 msgstr ""
 
 #: tmainform.menubp5spiclock.caption
+msgctxt "tmainform.menubp5spiclock.caption"
 msgid "Clock"
+msgstr ""
+
+#: tmainform.menubp5labels.caption
+msgid "Show pin labels"
 msgstr ""
 
 #: tmainform.menubp5disconnect.caption
@@ -434,6 +467,7 @@ msgid "Disconnect (HiZ, supply off)"
 msgstr ""
 
 #: tmainform.menubp5info.caption
+msgctxt "tmainform.menubp5info.caption"
 msgid "Device info / voltages"
 msgstr ""
 
@@ -450,6 +484,7 @@ msgid "Help"
 msgstr ""
 
 #: tmainform.menuhexeditorpopuprandom.caption
+msgctxt "tmainform.menuhexeditorpopuprandom.caption"
 msgid "Fill with random data"
 msgstr ""
 
@@ -458,6 +493,7 @@ msgid "no serial ports found - plug the device in"
 msgstr ""
 
 #: dregstr.str_dm_comport_none
+msgctxt "dregstr.str_dm_comport_none"
 msgid "COM port: none selected"
 msgstr ""
 
@@ -490,10 +526,11 @@ msgid "Use this address"
 msgstr ""
 
 #: dregstr.str_dm_i2c_addr_stored
-msgid "Address stored. It takes effect once an I2C chip is selected - that is when the address toggles appear."
+msgid "Address stored. It takes effect once the I2C bus is picked, which is when the address toggles appear."
 msgstr ""
 
 #: dregstr.str_dm_fill_title
+msgctxt "dregstr.str_dm_fill_title"
 msgid "Fill with random data"
 msgstr ""
 
@@ -511,8 +548,44 @@ msgstr ""
 
 #: dregstr.str_dm_skip_token
 msgid "Do not write %s"
+msgstr "Не писать %s"
+
+#: dregstr.str_dm_erase_not_sent
+msgid "The programmer could not send the erase command to the chip."
 msgstr ""
 
 #: dregstr.str_dm_maybe_protected
 msgid "The chip reported write protection before this ran, so it may have kept its old contents. Use Verify to be sure, and Unprotect if it did."
+msgstr ""
+
+#: dregstr.str_dm_bp5_supply_left_on
+msgid "The Bus Pirate may still be powering the target: the last session ended without switching the supply off. Unplug the Bus Pirate to be sure."
+msgstr ""
+
+#: dregstr.str_dm_en4b_failed
+msgid "EN4B (four byte address mode) could not be sent, so the operation stops: a chip left in three byte mode would take every address it sends wrongly."
+msgstr ""
+
+#: dregstr.str_dm_mw_init_failed
+msgid "Microwire could not be started on this programmer"
+msgstr ""
+
+#: dregstr.str_dm_fill_ask
+msgid "Replace the whole %d byte hexeditor content with random data?"
+msgstr ""
+
+#: dregstr.str_dm_fill_untouched
+msgid "The chip itself is not touched until you press %s."
+msgstr ""
+
+#: dregstr.str_dm_sreg_no_answer
+msgid "The status register could not be read: the transfer through the programmer failed."
+msgstr ""
+
+#: dregstr.str_dm_i2c_pages_failed
+msgid "%d of %d pages failed, the first at 0x%s. The write protect pin (WP) may be high, or the chip may protect that area (an SPD EEPROM can protect 00h-7Fh)."
+msgstr ""
+
+#: dregstr.str_dm_settings_not_saved
+msgid "The settings could not be saved: %s"
 msgstr ""

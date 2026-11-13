@@ -6,18 +6,18 @@ unit buspirate5hw;
   By Dreg
   https://github.com/therealdreg/asprogrammer-dregmod
 
-  This is a completely separate driver from buzzpirathw.pas. The v3.x speaks
-  BBIO, a stream of raw opcodes; the v5 and later speak BPIO2, which is
-  FlatBuffers packets inside COBS frames on a second USB serial port. The two
-  share nothing but the TBaseHardware contract, and both back ends can hold
-  their own port open at the same time.
+  This driver is separate from buzzpirathw.pas. The v3.x speaks BBIO, a stream
+  of raw opcodes; the v5 and later speak BPIO2, which is FlatBuffers packets
+  inside COBS frames on a second USB serial port. The two share nothing but
+  the TBaseHardware contract, and both back ends can hold their own port open
+  at the same time.
 
   Everything lives in this one unit, in three layers:
 
-    TBP5Port            serial transport over Synapse's TBlockSerial, plus the
-                        one thing BBIO never needed: read a COBS frame.
+    TBP5Port            serial transport over Synapse's TBlockSerial, plus
+                        reading a COBS frame.
 
-    TBusPirate5         the BPIO2 protocol engine - COBS, a hand written
+    TBusPirate5         the BPIO2 protocol engine: COBS, a hand written
                         FlatBuffers encoder and a generic decoder, the status
                         handshake, SPI and I2C.
 
@@ -29,25 +29,24 @@ unit buspirate5hw;
     - the BPIO2 schema, bpio.fbs
     - firmware: src/binmode/bpio.c, bpio_spi.c, bpio_i2c.c
 
-  Design notes worth knowing before touching this unit:
+  Design notes:
 
-  * There is no FlatBuffers runtime for Free Pascal here and we are not porting
-    one. Requests are fixed byte templates with the variable fields patched in
-    place - the layouts below were built by hand and verified byte for byte
-    against a real Bus Pirate 6. Responses cannot use templates, because the
-    firmware's flatcc emitter lays buffers out differently from anything we
-    emit, so the decoder is a fully generic vtable walker. It has to cope with
-    negative soffsets (flatcc puts vtables after their tables), truncated
-    vtables (trailing empty slots are dropped) and elided fields (anything
-    equal to its schema default is simply absent).
+  * There is no FlatBuffers runtime for Free Pascal here. Requests are fixed
+    byte templates with the variable fields patched in place; the layouts
+    below were built by hand and verified byte for byte against a real
+    Bus Pirate 6. Responses cannot use templates, because the firmware's
+    flatcc emitter lays them out its own way, so the decoder is a generic
+    vtable walker. It has to cope with negative soffsets (flatcc puts vtables
+    after their tables), truncated vtables (trailing empty slots are dropped)
+    and elided fields (a field equal to its schema default is absent).
 
-  * Three limits are firmware constants, not suggestions:
+  * Three firmware limits the host has to keep:
       - bytes_read must never exceed 512. The firmware detects the overrun but
         its error path jumps past the start of the response table, so flatcc
         builds a malformed packet or none at all, and the damage carries into
         later responses. Never probe this one.
-      - data_write is not checked by the firmware at all; the real ceiling is
-        the 643 byte frame buffer, so keep it to 512.
+      - data_write is not checked by the firmware; the real ceiling is the 643
+        byte frame buffer, so keep it to 512.
       - contents_type must be 1, 2 or 3. Zero indexes a NULL handler and reboots
         the device, so it is hardcoded in every template.
 
@@ -56,9 +55,9 @@ unit buspirate5hw;
     whether the vector is there.
 
   * The device only speaks BPIO2 when BPIO2 is the selected binmode. The
-    factory default is the SUMP logic analyser, which answers on the same port,
-    so a failed handshake means "wrong binmode", not "wrong port" - and it is
-    reported that way, once, rather than retried on every operation.
+    factory default is the SUMP logic analyser, which uses the same port, so a
+    failed handshake means "wrong binmode", not "wrong port". Open reports it
+    that way after one request, without retrying.
 }
 
 {$mode objfpc}{$H+}
@@ -69,21 +68,22 @@ uses
   Classes, SysUtils, Synaser, basehw;
 
 const
-  //--- firmware constants (bpio.c) -------------------------------------------
+  //Firmware constants (bpio.c)
   BP5_MAX_PACKET   = 640;
   BP5_MAX_WRITE    = 512;
   BP5_MAX_READ     = 512;
   //640 + ceil(640/254) of COBS overhead, the firmware's own frame buffer.
   BP5_MAX_COBS     = 643;
+  //The error of a DataRequest whose mode handler failed.
+  BP5_REQUEST_FAILED = 'Protocol request failed';
 
-  //Nominal only: this is USB CDC, so the rate is a formality the host driver
-  //records and the device ignores. Throughput is set by USB and by the SPI
-  //clock, never by this, which is why it is not offered as a setting.
+  //Nominal: on USB CDC the host driver records the rate and the device ignores
+  //it. USB and the SPI clock set the throughput, so the menu does not offer it.
   BP5_BAUD_DEFAULT = 3000000;
 
   BP5_USB_ID       = 'VID_1209&PID_7331';
 
-  //--- union tags ------------------------------------------------------------
+  //Union tags
   BP5_REQ_STATUS   = 1;
   BP5_REQ_CONFIG   = 2;
   BP5_REQ_DATA     = 3;
@@ -92,20 +92,20 @@ const
   BP5_RSP_CONFIG   = 2;
   BP5_RSP_DATA     = 3;
 
-  //--- ResponsePacket slots --------------------------------------------------
+  //ResponsePacket slots
   BP5_RP_ERROR         = 0;
   BP5_RP_CONTENTS_TYPE = 1;
   BP5_RP_CONTENTS      = 2;
 
-  //--- DataResponse slots ----------------------------------------------------
+  //DataResponse slots
   BP5_DR_ERROR     = 0;
   BP5_DR_DATA_READ = 1;
   BP5_DR_IS_ASYNC  = 2;
 
-  //--- ConfigurationResponse slots -------------------------------------------
+  //ConfigurationResponse slots
   BP5_CR_ERROR     = 0;
 
-  //--- StatusResponse slots --------------------------------------------------
+  //StatusResponse slots
   BP5_SR_ERROR          = 0;
   BP5_SR_FB_MAJOR       = 1;
   BP5_SR_FB_MINOR       = 2;
@@ -126,17 +126,29 @@ const
   BP5_SR_PSU_ERROR      = 21;
   BP5_SR_PULLUP_ENABLED = 22;
 
-  //Clocks offered in the menu. The firmware does no validation on the BPIO
-  //path, so the host clamps instead.
+  //Bounds the host clamps the clock to: the firmware does no validation on the
+  //BPIO path.
   BP5_SPI_MIN_HZ   = 1000;
   BP5_SPI_MAX_HZ   = 16000000;
-  //I2C speed is divided by 1000 on the device; below 1 kHz that divides by zero.
+  //The firmware divides by speed div 1000, so below 1 kHz it divides by zero.
   BP5_I2C_MIN_HZ   = 1000;
   BP5_I2C_MAX_HZ   = 1000000;
 
-type
+  //The status reports the voltage and current limit psu_set_v and psu_set_i
+  //last worked out, which can be well off the request (a DAC board clamps
+  //5.0 V to 4896 mV), so a session compares later reads with its first read
+  //after switching the supply on. A set voltage that moves more than this was
+  //set by someone else.
+  BP5_PSU_MV_SLACK = 10;
+  //VOUT under this share of the set voltage is a fault: the firmware's own
+  //default undervoltage limit (W command, 10 %), which BPIO2 switches off.
+  BP5_PSU_MIN_PERCENT = 90;
+  //psu_enable waits 10 ms, and this much more with a current limit (psu.c).
+  //VOUT read low right after a configuration is read again after this wait,
+  //so a supply with no limit gets as long to settle.
+  BP5_PSU_SETTLE_MS = 500;
 
-{ TBP5Port }
+type
 
 TBP5Port = class
 private
@@ -148,6 +160,8 @@ private
   //lost and the frame after them beheaded.
   FResidual: TBytes;
   function Fail(const Where: string): boolean;
+  function GetWriteTimeout: integer;
+  procedure SetWriteTimeout(Ms: integer);
 public
   constructor Create;
   destructor Destroy; override;
@@ -157,8 +171,8 @@ public
   function IsOpen: boolean;
 
   function WriteAll(const Buffer; Count: integer): boolean;
-  //Reads until the first 0x00 and returns the frame without that delimiter.
-  //TimeoutMs restarts on every byte that arrives.
+  //Reads the next frame, without its 0x00 delimiter, into Frame; zeros before
+  //it are skipped. TimeoutMs restarts on every byte that arrives.
   function ReadFrame(out Frame: TBytes; TimeoutMs: integer): boolean;
 
   procedure Purge;
@@ -167,36 +181,38 @@ public
 
   property LastError: string read FLastError;
   property PortName: string read FPortName;
+  //How long one write may wait for the driver to take the bytes (synaser's
+  //DeadlockTimeout). A device whose firmware hung with USB still up takes none.
+  //It bounds a pending read too, but this unit only reads bytes already there.
+  property WriteTimeoutMs: integer read GetWriteTimeout write SetWriteTimeout;
 end;
 
-//--- COBS ---------------------------------------------------------------------
-//Consistent Overhead Byte Stuffing. The encoded form never contains a zero, so
-//a zero delimits a frame.
+//COBS, Consistent Overhead Byte Stuffing: the encoded form never contains a
+//zero, so a zero delimits a frame.
 function BP5CobsEncode(const Src: TBytes): TBytes;
 function BP5CobsDecode(const Src: TBytes; out Dst: TBytes): boolean;
 
-//--- device enumeration -------------------------------------------------------
+//Device enumeration
 type
   TBP5Device = record
     DataPort: string;    //MI_02, the BPIO2 interface
     TermPort: string;    //MI_00, the user terminal
-    Name: string;        //USB serial string: 5buspirate, 6buspirate, ...
+    Name: string;        //USB serial string: chip ID in hex, or 5buspirate, ...
     Present: boolean;    //still plugged in
   end;
   TBP5DeviceArray = array of TBP5Device;
 
-//Every serial port the system currently has, sorted the way a human reads COM
-//numbers. This is the list the menu is built from: it works on any machine,
-//whatever the driver stack, exactly like the v3.x back end's port list.
+//Every serial port the system has now, sorted by COM number. The menu lists
+//these, as the v3.x menu does, so it works whatever the driver stack.
 procedure BP5GetSerialPorts(AList: TStrings);
 
-//Best effort identification of Bus Pirate v5+ units from the USB registry, to
-//annotate that list. Never the sole source of the menu: a machine where this
-//finds nothing must still be able to pick a port by hand.
+//Finds Bus Pirate v5+ units in the USB registry, best effort, to label the
+//ports of that list as BPIO2 or terminal. The menu does not depend on it: on a
+//machine where this finds nothing, the user still picks a port by hand.
 function BP5EnumerateDevices: TBP5DeviceArray;
 
-//What a given COM port is, for the menu caption: '' when nothing is known,
-//otherwise something like 'Bus Pirate 6, BPIO2' or 'Bus Pirate 6, terminal'.
+//What a COM port is, for the menu caption: '' when nothing is known, else
+//the Name or 'Bus Pirate' and the interface, as in '6buspirate, terminal'.
 function BP5DescribePort(const Devices: TBP5DeviceArray; const APort: string;
                          out IsData, IsTerminal: boolean): string;
 
@@ -205,6 +221,15 @@ type
 
   TBP5LogLevel = (bp5lError, bp5lInfo, bp5lDebug);
   TBP5LogEvent = procedure(Level: TBP5LogLevel; const Msg: string) of object;
+
+  //What a configuration request does to the target supply. The firmware's
+  //psu_enable switches the supply off and on again, then waits 10 ms, and
+  //500 ms more with a current limit, so On goes out only when the request
+  //changes or FPsuKnown is false. Leave sends neither flag.
+  TBP5PsuAction = (bp5psuLeave, bp5psuOn, bp5psuOff);
+
+  //How Disconnect ended.
+  TBP5Park = (bp5pkNoSession, bp5pkParked, bp5pkFailed);
 
   TBP5Status = record
     Valid: boolean;
@@ -230,8 +255,8 @@ type
 
   TBP5SPISettings = record
     SpeedHz: LongWord;
-    ClockPolarity: boolean;   //CPOL
-    ClockPhase: boolean;      //CPHA
+    ClockPolarity: boolean;
+    ClockPhase: boolean;
     ChipSelectIdleHigh: boolean;
     Power: boolean;
     PsuMv: LongWord;
@@ -247,8 +272,6 @@ type
     Pullups: boolean;
   end;
 
-{ TBusPirate5 }
-
 TBusPirate5 = class
 private
   FPort: TBP5Port;
@@ -258,10 +281,15 @@ private
   FOnLog: TBP5LogEvent;
   FVerbose: boolean;
 
-  //Set when a reply was lost or could not be parsed. Nothing else goes out
-  //until Resync has proved the link is back in step.
+  //Set when a request or its reply was lost, or a reply could not be parsed.
+  //Nothing else goes out until Resync has proved the link is back in step.
   FDesynced: boolean;
   FRecovering: boolean;
+  //The guard's refusal is logged once per out of sync episode.
+  FRefusalLogged: boolean;
+  //Whether FLastError went to the log (SetError) or was only kept: a device's
+  //own refusal is the expected answer of an I2C probe and stays quiet.
+  FLastErrorLogged: boolean;
 
   //Deferred CS-low write bytes, so a write/read pair costs one round trip.
   FPending: TBytes;
@@ -274,26 +302,56 @@ private
   FSPI: TBP5SPISettings;
   FI2C: TBP5I2CSettings;
 
+  //The supply request the device last accepted. While it is known and the
+  //same, a new configuration leaves the supply alone instead of power cycling
+  //the target. Forgotten on Open, on Close, after a failed configuration that
+  //carried a supply flag, and whenever a status read finds the supply no
+  //longer as set.
+  FPsuKnown: boolean;
+  FPsuOn: boolean;
+  FPsuMv: LongWord;
+  FPsuMa: LongWord;
+  //What the first status read after switching the supply on reported.
+  FPsuRefKnown: boolean;
+  FPsuRefMv: LongWord;
+  FPsuRefMa: LongWord;
+  //A status read found the supply in another state than the one this session
+  //set: the current limit tripped, VOUT sagged, or someone used the terminal.
+  FPsuChanged: boolean;
+  FPsuChangeWhy: string;
+  //The only problem found is VOUT under BP5_PSU_MIN_PERCENT: the supply is
+  //still as set, so FPsuKnown stays and RecheckSag can read VOUT again.
+  FPsuSagging: boolean;
+  //The device may still be powering the target. Survives Close, so a session
+  //that ended without parking the device is not taken for one switched off.
+  FSupplyMayBeOn: boolean;
+
   procedure Log(Level: TBP5LogLevel; const Msg: string);
   function SetError(const Msg: string): boolean;
   procedure MarkDesynced(const Why: string);
+  function PsuActionFor(Power: boolean; Mv, Ma: LongWord): TBP5PsuAction;
+  procedure NotePsuApplied(Action: TBP5PsuAction; Power: boolean; Mv, Ma: LongWord);
+  procedure CheckPsu;
+  function GetPsuOn: boolean;
 
-  //One request, one response. Returns the decoded response body.
+  //One request, one response: Response is the whole decoded packet and
+  //BodyPos the position of its contents table.
   function Transact(const Request: TBytes; WantType: byte;
                     out Response: TBytes; out BodyPos: integer;
                     TimeoutMs: integer): boolean;
 
-  function EncodeStatus(VersionAndModeOnly: boolean): TBytes;
+  function EncodeStatus(Quick: boolean): TBytes;
   function EncodeConfig(const AMode: string; SpeedHz: LongWord;
                         DataBits: byte; ClockStretch, ClockPolarity,
                         ClockPhase, ChipSelectIdle: boolean;
                         SetBitorderMsb: boolean;
-                        PsuEnable: boolean; PsuMv: LongWord; PsuMa: word;
+                        Psu: TBP5PsuAction; PsuMv: LongWord; PsuMa: word;
                         Pullups: boolean): TBytes;
   function EncodeData(StartMain, StopMain: boolean; BytesRead: word;
                       WritePtr: Pointer; WriteCount: integer): TBytes;
 
-  function ReadStatus(VersionAndModeOnly: boolean): boolean;
+  //Quick: version and supply only, for the probe and the liveness check.
+  function ReadStatus(Quick: boolean): boolean;
   function SendConfig(const Request: TBytes; const What: string): boolean;
 
   function PendingAdd(const Buffer; Count: integer): boolean;
@@ -308,10 +366,14 @@ public
   procedure Close;
   function IsOpen: boolean;
 
-  //Cheap liveness check and the thing that proves BPIO2 is really active.
+  //Liveness check: a quick status read proves BPIO2 is active and reads the
+  //supply state too, so check PsuChanged afterwards.
   function Ping: boolean;
-  //Drains whatever is in flight and re-establishes the link and the mode.
+  //Drains whatever is in flight and proves the link again, like Ping. It
+  //leaves the mode and the supply alone: re-entering the mode can switch the
+  //supply on again, and the power down path runs this too.
   function Resync: boolean;
+  procedure ClearPsuChanged;
   //Refreshes the whole status block, for the device info window.
   function RefreshStatus: boolean;
 
@@ -319,7 +381,6 @@ public
   function EnterI2C(const Settings: TBP5I2CSettings): boolean;
   function EnterHiZ: boolean;
 
-  //--- SPI -------------------------------------------------------------------
   function SPIQueueWrite(Data: Pointer; Count: integer): boolean;
   function SPIFlushQueued: boolean;
   function SPITransfer(WritePtr: Pointer; WriteCount: integer;
@@ -328,7 +389,6 @@ public
   function SPIReleaseCS: boolean;
   procedure SPIDropQueued;
 
-  //--- I2C -------------------------------------------------------------------
   function I2CStart: boolean;
   function I2CStop: boolean;
   function I2CWriteByte(Data: byte; out Acked: boolean): boolean;
@@ -338,26 +398,36 @@ public
   function I2CScan(FirstAddr, LastAddr: integer; out Found: TBytes): boolean;
 
   property LastError: string read FLastError;
+  property LastErrorLogged: boolean read FLastErrorLogged;
   property Mode: TBP5Mode read FMode;
   property Status: TBP5Status read FStatus;
   property Desynced: boolean read FDesynced;
+  //The supply is on as this session set it, and no read since says otherwise.
+  property PsuOn: boolean read GetPsuOn;
+  property PsuChanged: boolean read FPsuChanged;
+  property PsuChangeWhy: string read FPsuChangeWhy;
+  property PsuSagging: boolean read FPsuSagging;
+  property SupplyMayBeOn: boolean read FSupplyMayBeOn;
   property OnLog: TBP5LogEvent read FOnLog write FOnLog;
   property Verbose: boolean read FVerbose write FVerbose;
   property Port: TBP5Port read FPort;
 end;
-
-{ TBusPirate5Hardware }
 
 TBusPirate5Hardware = class(TBaseHardware)
 private
   FBP: TBusPirate5;
   FDevOpened: boolean;
   FStrError: string;
+  //Whether FStrError reached the log (Complain) or was only kept.
+  FErrorLogged: boolean;
   FOpenPort: string;
   FAppliedConfig: string;
 
   procedure HandleLog(Level: TBP5LogLevel; const Msg: string);
   function Complain(const Msg: string): boolean;
+  function TakeSupplyChange: string;
+  function SupplyChanged: boolean;
+  function RecheckSag: boolean;
 
   function WantI2C: boolean;
   function SelectedSPIHz: LongWord;
@@ -369,21 +439,21 @@ private
   function ConfigSignature: string;
 
   function Connect(const APort: string): boolean;
+  function ReadyLink(const APort: string): boolean;
 public
   constructor Create;
   destructor Destroy; override;
 
   function GetLastError: string; override;
+  function ErrorWasLogged: boolean; override;
   function DevOpen: boolean; override;
   procedure DevClose; override;
 
-  //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
   function SPIWrite(CS: byte; BufferLen: integer; buffer: array of byte): integer; override;
   function SPIInit(speed: integer): boolean; override;
   procedure SPIDeinit; override;
 
-  //I2C
   procedure I2CInit; override;
   procedure I2CDeinit; override;
   function I2CReadWrite(DevAddr: byte;
@@ -394,7 +464,7 @@ public
   function I2CReadByte(ack: boolean): byte; override;
   function I2CWriteByte(data: byte): boolean; override; //return ack
 
-  //MICROWIRE - not reachable over BPIO2, see the note in MWInit.
+  //Microwire is not reachable over BPIO2: MWInit, MWRead and MWWrite fail.
   function MWInit(speed: integer): boolean; override;
   procedure MWDeinit; override;
   function MWRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
@@ -402,11 +472,16 @@ public
   function MWIsBusy: boolean; override;
 
   //Extras driven from the BusPirateV5+ menu.
-  procedure Disconnect;
+  function Disconnect: TBP5Park;
   //HiZ with the supply off, recovering the link first if it needs it.
   function SafePowerDown: boolean;
+  //No session is open, and the last one may have left the target powered.
+  function SupplyMayBeOn: boolean;
   function DeviceReport: string;
   function ScanI2CBus(out Found: TBytes; out ErrMsg: string): boolean;
+  //The bus picked in the window, SPI or I2C, labelled on the device's screen
+  //with the supply and the pull-ups off.
+  function ShowPinLabels(out ErrMsg: string): boolean;
   function I2CDeviceLine(Addr: byte): string;
   function I2CBusDescription: string;
   //Largest read the device will accept, for the chunk size ladders in main.pas.
@@ -417,18 +492,40 @@ implementation
 
 uses Registry, Menus, main;
 
-//============================================================================
-//  Serial transport
-//============================================================================
+//Serial transport
 
 const
   BPSER_DEADLOCK_MS = 15000;
   BPSER_RX_BUFFER   = 65536;
+  //Write timeout while parking, for Resync's delimiter and for the first
+  //request of Open: those requests are at most about 130 bytes on the wire,
+  //which a live device takes at once, and each write would otherwise wait the
+  //full deadlock timeout on a hung one, or on one left in SUMP.
+  BPSER_PARK_WRITE_MS = 1000;
+
+type
+  //A Bus Pirate whose active binmode is SUMP starts its logic analyser when
+  //DTR rises: with the port opened with DTR high, a Bus Pirate 5 put 3.3 V on
+  //VOUT, and the bytes of a BPIO2 request armed the analyser and hung the
+  //firmware. synaser raises DTR in Connect and in Config, so this class turns
+  //every DTR write into DTR off. BPIO2 reads requests whatever DTR says.
+  //By Dreg
+  TBP5Serial = class(TBlockSerial)
+  protected
+    procedure SetDTRF(Value: Boolean); override;
+  end;
+
+{$push}{$hints off}
+procedure TBP5Serial.SetDTRF(Value: Boolean);
+begin
+  inherited SetDTRF(false);
+end;
+{$pop}
 
 constructor TBP5Port.Create;
 begin
   inherited Create;
-  FSerial := TBlockSerial.Create;
+  FSerial := TBP5Serial.Create;
   FSerial.RaiseExcept := false;
   FSerial.DeadlockTimeout := BPSER_DEADLOCK_MS;
   //No handshake lines are wired; never gate I/O on them.
@@ -454,6 +551,16 @@ begin
   result := false;
 end;
 
+function TBP5Port.GetWriteTimeout: integer;
+begin
+  result := FSerial.DeadlockTimeout;
+end;
+
+procedure TBP5Port.SetWriteTimeout(Ms: integer);
+begin
+  FSerial.DeadlockTimeout := Ms;
+end;
+
 function TBP5Port.Open(const APortName: string; ABaudRate: LongWord): boolean;
 begin
   FLastError := '';
@@ -464,9 +571,21 @@ begin
   if FSerial.LastError <> 0 then Exit(Fail('cannot open ' + APortName));
 
   //USB CDC: the line settings are cosmetic, but they still have to be applied
-  //or the driver may refuse the handle.
+  //or the driver may refuse the handle. They are set as synaser's Config sets
+  //them, except DTR: Config writes a DCB that raises it, and TBP5Serial above
+  //only stops the DTR property, so the DCB is written here with DTR off.
+  //By Dreg
   if ABaudRate = 0 then ABaudRate := BP5_BAUD_DEFAULT;
-  FSerial.Config(ABaudRate, 8, 'N', SB1, false, false);
+  FSerial.GetCommState;
+  FSerial.DCB.DCBlength := SizeOf(FSerial.DCB);
+  FSerial.DCB.BaudRate := ABaudRate;
+  FSerial.DCB.ByteSize := 8;
+  FSerial.DCB.Parity := 0;
+  FSerial.DCB.StopBits := SB1;
+  FSerial.DCB.XonChar := #17;
+  FSerial.DCB.XoffChar := #19;
+  FSerial.DCB.Flags := dcb_Binary or dcb_RtsControlEnable;
+  FSerial.SetCommState;
   if FSerial.LastError <> 0 then
   begin
     Fail('cannot configure ' + APortName);
@@ -474,7 +593,8 @@ begin
     Exit(false);
   end;
 
-  //Must come after Config: the setter re-applies the DCB.
+  //Must come after the line settings: the setter writes the DCB again, with
+  //DTR as it finds it.
   FSerial.SizeRecvBuffer := BPSER_RX_BUFFER;
   FSerial.Purge;
   result := true;
@@ -537,15 +657,14 @@ begin
 
   deadline := GetTickCount64 + QWord(TimeoutMs);
 
-  //The deadline above restarts on every byte, on purpose, so a device that
-  //trickles a long answer is not cut off half way. On its own that bounds
-  //nothing: a stuck-low line or a break condition delivers a continuous stream
-  //of 0x00, every byte of which is thrown away below as a leading delimiter
-  //without ever growing the frame, and refreshes the window again. This runs on
-  //the GUI thread with no message pump and no cancel, so it is a hard freeze,
-  //and it is reachable by choosing any port that is not a Bus Pirate. Keep a
-  //second deadline that nothing is allowed to touch, and a cap on how many
-  //delimiters may be discarded before calling it what it is.  By Dreg
+  //The deadline above restarts on every byte, so a device that trickles a long
+  //answer is not cut off half way. On its own that bounds nothing: a stuck-low
+  //line or a break condition delivers a continuous stream of 0x00, which keeps
+  //restarting it, and every byte is thrown away below as a leading delimiter
+  //without growing the frame. This runs on the GUI thread with no message pump
+  //and no cancel, so that is a hard freeze, reachable by choosing any port that
+  //is not a Bus Pirate. A second deadline that nothing restarts, and a cap on
+  //the delimiters thrown away, end the read.  By Dreg
   hardDeadline := GetTickCount64 + QWord(TimeoutMs) * 4 + 2000;
   skipped := 0;
 
@@ -569,8 +688,8 @@ begin
     begin
     //Read what has actually arrived, never a fixed block. RecvBufferEx waits
     //for the full count it is given, so asking for a buffer-sized chunk makes
-    //every single response pay the whole inter-byte timeout after its last
-    //byte - which turned a 7 ms round trip into 47 ms.
+    //every response pay the whole inter-byte timeout after its last byte: a
+    //7 ms round trip takes 47 ms.
     avail := FSerial.WaitingDataEx;
     if avail > SizeOf(buf) then avail := SizeOf(buf);
     if avail > 0 then
@@ -587,8 +706,8 @@ begin
     begin
       if buf[i] = 0 then
       begin
-        //Leading delimiters from a previous frame are just noise, but a stream
-        //of nothing else is not noise, it is the wrong port or a broken line.
+        //Leading delimiters from a previous frame are noise, but a stream of
+        //nothing else means the wrong port or a broken line.
         if len = 0 then
         begin
           Inc(skipped);
@@ -624,7 +743,7 @@ end;
 procedure TBP5Port.Purge;
 begin
   //The residual belongs to the bytes being discarded, or a purge would not
-  //actually start the next request clean.
+  //start the next request clean.
   SetLength(FResidual, 0);
   if IsOpen then FSerial.Purge;
 end;
@@ -659,9 +778,7 @@ begin
   end;
 end;
 
-//============================================================================
-//  COBS
-//============================================================================
+//COBS
 
 function BP5CobsEncode(const Src: TBytes): TBytes;
 var
@@ -750,9 +867,7 @@ begin
   result := true;
 end;
 
-//============================================================================
-//  FlatBuffers - little endian helpers and the generic decoder
-//============================================================================
+//FlatBuffers: little endian helpers and the generic decoder
 
 //Bounds checks throughout this decoder subtract from the buffer length and
 //never add to a wire-supplied offset: the offsets come from untrusted data,
@@ -802,7 +917,7 @@ begin
   B[Pos + 3] := (V shr 24) and $FF;
 end;
 
-//Position of a field inside a table, or 0 when the field is absent - which in
+//Position of a field inside a table, or 0 when the field is absent, which in
 //FlatBuffers means "equal to its schema default", never "not reported".
 function FieldPos(const B: TBytes; Table, Slot: integer): integer;
 var
@@ -812,7 +927,7 @@ var
 begin
   result := 0;
   if (Table < 0) or (Length(B) < 4) or (Table > Length(B) - 4) then Exit;
-  //Signed: flatcc emits vtables AFTER their tables, so this is often negative.
+  //Signed: flatcc emits vtables after their tables, so this is often negative.
   if not GetI32(B, Table, soff) then Exit;
   vt := Table - soff;
   if (vt < 0) or (vt > Length(B) - 4) then Exit;
@@ -883,16 +998,16 @@ begin
   sp := Deref(B, p);
   if sp = 0 then Exit;
   if not GetU32(B, sp, n) then Exit;
-  //Unsigned comparison against the space that is actually left. GetU32
-  //succeeding already proves sp + 4 <= Length(B), so this cannot wrap.
-  //A signed cast here made the guard pass for any length above $7FFFFFFF.
+  //Unsigned comparison against the space that is left. GetU32 succeeding
+  //already proves sp + 4 <= Length(B), so this cannot wrap. A signed cast here
+  //would let any length above $7FFFFFFF through.
   if (n = 0) or (n > LongWord(Length(B) - sp - 4)) or (n > BP5_MAX_PACKET) then Exit;
   SetLength(result, n);
   for i := 1 to integer(n) do
     result[i] := Chr(B[sp + 3 + i]);
 end;
 
-//Vector of strings, joined with a separator - the GUI never needs them apart.
+//Vector of strings, joined with a separator: the GUI never needs them apart.
 function FieldStrList(const B: TBytes; Table, Slot: integer; const Sep: string): string;
 var
   p, sp, i, ep, strp, j: integer;
@@ -905,7 +1020,7 @@ begin
   sp := Deref(B, p);
   if sp = 0 then Exit;
   if not GetU32(B, sp, n) then Exit;
-  //A vector of strings is four bytes per element, so this is what fits.
+  //Each element is a four byte offset to its string, so this is what fits.
   if n > LongWord((Length(B) - sp - 4) div 4) then Exit;
   if n > 64 then n := 64;
   for i := 0 to integer(n) - 1 do
@@ -922,7 +1037,7 @@ begin
   end;
 end;
 
-//Vector of ubyte. Count is returned so an empty vector can be told from absent.
+//Vector of ubyte. The result tells an empty vector (true) from an absent one.
 function FieldBytes(const B: TBytes; Table, Slot: integer; out Data: TBytes): boolean;
 var
   p, sp: integer;
@@ -934,32 +1049,32 @@ begin
   sp := Deref(B, p);
   if sp = 0 then Exit(false);
   if not GetU32(B, sp, n) then Exit(false);
-  //Same rule, and this one guards a Move.
+  //The same unsigned check as in FieldStr, and here it guards a Move.
   if (n > LongWord(Length(B) - sp - 4)) or (n > BP5_MAX_PACKET) then Exit(false);
   SetLength(Data, n);
   if n > 0 then Move(B[sp + 4], Data[0], n);
   result := true;
 end;
 
-//============================================================================
-//  Request templates
-//============================================================================
+//Request templates
 
-//StatusRequest with an empty query table, which the firmware reads as "all".
+//StatusRequest with no query vector, which the firmware reads as "all".
 const
   TPL_STATUS_ALL: array[0..35] of byte = (
     $14, $00, $00, $00, $0C, $00, $0C, $00, $04, $00, $06, $00, $05, $00, $08, $00,
     $04, $00, $04, $00, $10, $00, $00, $00, $02, $01, $00, $00, $04, $00, $00, $00,
     $10, $00, $00, $00);
 
-//StatusRequest([Version, Mode]) - the connect probe. Its answer is ~470 bytes,
-//comfortably inside the device's 643 byte frame buffer, where the "all" form
-//comes back at 562 and leaves very little headroom.
-  TPL_STATUS_VM: array[0..51] of byte = (
+//StatusRequest([Version, PSU]): the connect probe and the liveness check.
+//It leaves out the mode list, which is most of the "all" answer and grows
+//with every mode the firmware gains. It brings back the supply state, so a
+//current limit that tripped mid-session shows at the next check. Byte 49 is
+//the second query: 4 = PSU.
+  TPL_STATUS_VP: array[0..51] of byte = (
     $18, $00, $00, $00, $0C, $00, $0C, $00, $04, $00, $06, $00, $05, $00, $08, $00,
     $06, $00, $08, $00, $04, $00, $00, $00, $14, $00, $00, $00, $02, $01, $00, $00,
     $04, $00, $00, $00, $14, $00, $00, $00, $04, $00, $00, $00, $02, $00, $00, $00,
-    $01, $02, $00, $00);
+    $01, $04, $00, $00);
 
 //DataRequest, fixed 64 byte prefix; the write vector is appended.
 //  48 start_main   49 start_alt   50 stop_main   51 stop_alt
@@ -979,7 +1094,7 @@ const
 
 //ConfigurationRequest + nested ModeConfiguration, 116 byte prefix; the mode
 //name is appended as a length prefixed, NUL terminated string.
-//   88 psu_set_mv (u32)   92 psu_set_ma (u16)   94 bitorder_msb  95 bitorder_lsb
+//   88 psu_set_mv (u32)   92 psu_set_ma (u16)  94 bitorder_msb  95 bitorder_lsb
 //   96 psu_disable  97 psu_enable  98 pullup_disable  99 pullup_enable
 //  104 speed (u32)  108 data_bits  109 clock_stretch  110 cpol  111 cpha
 //  112 chip_select_idle
@@ -1004,9 +1119,7 @@ const
     $00, $00, $00, $00,
     $00, $00, $00, $00);
 
-//============================================================================
-//  TBusPirate5
-//============================================================================
+//TBusPirate5
 
 constructor TBusPirate5.Create;
 begin
@@ -1033,7 +1146,8 @@ end;
 function TBusPirate5.SetError(const Msg: string): boolean;
 begin
   FLastError := Msg;
-  Log(bp5lError, Msg);
+  FLastErrorLogged := true;
+  Log(bp5lError, 'BusPirateV5+: ' + Msg);
   result := false;
 end;
 
@@ -1041,15 +1155,106 @@ procedure TBusPirate5.MarkDesynced(const Why: string);
 begin
   if FDesynced or FRecovering then Exit;
   FDesynced := true;
+  FRefusalLogged := false;
   FPendingLen := 0;
-  Log(bp5lInfo, 'BusPirateV5+: link out of sync (' + Why +
-                '), it will be re-armed before the next operation');
+  //The log line does not say when the link is re-armed: DevOpen and ReadyLink
+  //do it in the same call when their own status read is the request that
+  //failed.
+  Log(bp5lInfo, 'BusPirateV5+: link out of sync (' + Why + ')');
+end;
+
+//The firmware's psu_enable switches the supply off and on again, then waits
+//10 ms, and 500 ms more with a current limit (psu.c), so every request with
+//psu_enable restarts the target. Off costs nothing and is always sent.
+function TBusPirate5.PsuActionFor(Power: boolean; Mv, Ma: LongWord): TBP5PsuAction;
+begin
+  if not Power then
+    result := bp5psuOff
+  else if FPsuKnown and FPsuOn and (FPsuMv = Mv) and (FPsuMa = Ma) then
+    result := bp5psuLeave
+  else
+    result := bp5psuOn;
+end;
+
+procedure TBusPirate5.NotePsuApplied(Action: TBP5PsuAction; Power: boolean;
+  Mv, Ma: LongWord);
+begin
+  if Action = bp5psuLeave then Exit;
+  FPsuKnown := true;
+  FPsuOn := Power;
+  FPsuMv := Mv;
+  FPsuMa := Ma;
+  //The next status read records what the device made of the request.
+  FPsuRefKnown := false;
+  FPsuChanged := false;
+  FSupplyMayBeOn := Power;
+end;
+
+//Every status read asks for the supply, and this compares it with what this
+//session set: the firmware cuts the supply when the current limit trips, and
+//the terminal port stays usable while BPIO2 runs. VOUT is checked here
+//because BPIO2 asks for no undervoltage check (100 %, bpio.c).
+procedure TBusPirate5.CheckPsu;
+begin
+  FSupplyMayBeOn := FStatus.PsuEnabled;
+  if not FPsuKnown then Exit;
+  if not FPsuOn then
+  begin
+    if not FStatus.PsuEnabled then Exit;
+    FPsuChangeWhy := 'the target supply was switched on outside this program';
+  end
+  else if FStatus.PsuError then
+    FPsuChangeWhy := 'the current limit tripped and the Bus Pirate cut the target supply'
+  else if not FStatus.PsuEnabled then
+    FPsuChangeWhy := 'the target supply was switched off outside this program'
+  else
+  begin
+    if not FPsuRefKnown then
+    begin
+      FPsuRefKnown := true;
+      FPsuRefMv := FStatus.PsuSetMv;
+      FPsuRefMa := FStatus.PsuSetMa;
+    end;
+    if (Abs(int64(FStatus.PsuSetMv) - int64(FPsuRefMv)) > BP5_PSU_MV_SLACK) or
+       (FStatus.PsuSetMa <> FPsuRefMa) then
+      FPsuChangeWhy := Format('the target supply was set to %d mV, %d mA outside this program',
+                              [FStatus.PsuSetMv, FStatus.PsuSetMa])
+    else if int64(FStatus.PsuMeasMv) * 100 < int64(FStatus.PsuSetMv) * BP5_PSU_MIN_PERCENT then
+    begin
+      FPsuChangeWhy := Format('the target supply measures %d mV, under %d %% of the %d mV ' +
+                              'set (a short or a heavy load)',
+                              [FStatus.PsuMeasMv, BP5_PSU_MIN_PERCENT, FStatus.PsuSetMv]);
+      FPsuChanged := true;
+      FPsuSagging := true;
+      Exit;
+    end
+    else
+      Exit;
+  end;
+  FPsuChanged := true;
+  FPsuSagging := false;
+  FPsuKnown := false;
+end;
+
+function TBusPirate5.GetPsuOn: boolean;
+begin
+  result := FPsuKnown and FPsuOn;
+end;
+
+procedure TBusPirate5.ClearPsuChanged;
+begin
+  FPsuChanged := false;
+  FPsuSagging := false;
+  FPsuChangeWhy := '';
 end;
 
 function TBusPirate5.IsOpen: boolean;
 begin
   result := FPort.IsOpen and (FMode <> bp5Closed);
 end;
+
+const
+  BP5_REFUSED_MSG = 'the link is out of sync after a failed transfer; it must be re-armed first';
 
 function TBusPirate5.Transact(const Request: TBytes; WantType: byte;
   out Response: TBytes; out BodyPos: integer; TimeoutMs: integer): boolean;
@@ -1063,8 +1268,19 @@ begin
   SetLength(Response, 0);
   BodyPos := 0;
 
+  //The refusal is logged once per out of sync episode: an I2C busy poll asks
+  //again with no pause for 5 s, and every answer would be the same line.
   if FDesynced and (not FRecovering) then
-    Exit(SetError('the link is out of sync after a failed transfer; it must be re-armed first'));
+  begin
+    if FRefusalLogged then
+    begin
+      FLastError := BP5_REFUSED_MSG;
+      FLastErrorLogged := true;
+      Exit(false);
+    end;
+    FRefusalLogged := true;
+    Exit(SetError(BP5_REFUSED_MSG));
+  end;
 
   frame := BP5CobsEncode(Request);
   SetLength(frame, Length(frame) + 1);
@@ -1072,22 +1288,26 @@ begin
 
   FPort.Purge;
   if not FPort.WriteAll(frame[0], Length(frame)) then
-    Exit(SetError(FPort.LastError));
+  begin
+    SetError(FPort.LastError);
+    //Part of the frame may have gone out, and the port of a Bus Pirate that
+    //was unplugged and plugged back in fails every write: either way the link
+    //has to be re-armed, or the port opened again, before the next request.
+    MarkDesynced('write failed');
+    Exit(false);
+  end;
 
-  //A frame that cannot be the answer to THIS request has to be thrown away
-  //rather than reported, or one stray packet desynchronises every operation
-  //that follows. Our requests are built from verified templates and guarded,
-  //so a framing or validation complaint from the device is by definition about
-  //something else - another program on the port, line noise, or the tail of a
-  //session that died. Keep reading until the deadline.
+  //A frame that cannot be the answer to this request is thrown away, or one
+  //stray packet desynchronises every operation that follows. The device may
+  //still be answering another program, line noise or the tail of a session
+  //that died. Keep reading until the deadline.
   deadline := GetTickCount64 + QWord(TimeoutMs);
   staleErr := '';
   skipped := 0;
 
   repeat
-    //The budget is the budget. Without this the loop bought itself a fresh
-    //window for every frame it discarded and could run for ever on the GUI
-    //thread, with no way out.
+    //One deadline for the whole call: a fresh window for every discarded
+    //frame would hold the GUI thread far past the timeout, with no way out.
     left := integer(int64(deadline) - int64(GetTickCount64));
     if (left <= 0) or (skipped > 8) then
     begin
@@ -1131,7 +1351,7 @@ begin
 
     if outerErr <> '' then
     begin
-      //Almost always this IS the answer: the firmware reports version and
+      //Almost always this is the answer: the firmware reports version and
       //validation problems this way. It is only worth looking past it once,
       //in case it belongs to something that was already in the pipe, and the
       //grace window for that is short.
@@ -1171,10 +1391,11 @@ begin
     begin
       //The device refusing a request is not a transport failure, and for an
       //I2C probe or an acknowledge poll it is the expected answer. Record it
-      //without writing an error line: a 112 address bus scan used to leave 110
-      //of them in the log. Framing, timeout and desync failures still go
-      //through SetError and are still logged.  By Dreg
+      //without writing an error line, or a 112 address bus scan leaves 110 of
+      //them in the log. Framing, timeout and desync failures go through
+      //SetError and are logged.  By Dreg
       FLastError := innerErr;
+      FLastErrorLogged := false;
       Exit(false);
     end;
 
@@ -1186,12 +1407,12 @@ begin
   until false;
 end;
 
-function TBusPirate5.EncodeStatus(VersionAndModeOnly: boolean): TBytes;
+function TBusPirate5.EncodeStatus(Quick: boolean): TBytes;
 begin
-  if VersionAndModeOnly then
+  if Quick then
   begin
-    SetLength(result, Length(TPL_STATUS_VM));
-    Move(TPL_STATUS_VM[0], result[0], Length(result));
+    SetLength(result, Length(TPL_STATUS_VP));
+    Move(TPL_STATUS_VP[0], result[0], Length(result));
   end
   else
   begin
@@ -1208,18 +1429,18 @@ begin
   SetLength(result, 0);
   if WriteCount < 0 then WriteCount := 0;
 
-  //Guards for the three firmware landmines. These are internal errors, not
-  //user errors: nothing must ever construct such a packet.
+  //Guards against three requests the firmware mishandles. These are internal
+  //errors, not user errors: nothing must ever construct such a packet.
   if BytesRead > BP5_MAX_READ then
     raise Exception.CreateFmt('BPIO2: bytes_read %d exceeds %d', [BytesRead, BP5_MAX_READ]);
   if WriteCount > BP5_MAX_WRITE then
     raise Exception.CreateFmt('BPIO2: data_write %d exceeds %d', [WriteCount, BP5_MAX_WRITE]);
-  //A read that opens with a start makes the firmware read data_write[0] to
-  //build the read address, without checking that the vector is there.
+  //An I2C read that opens with a start makes the firmware read data_write[0]
+  //to build the read address, without checking that the vector is there. It
+  //is refused in every mode.
   if StartMain and (BytesRead > 0) and (WriteCount < 1) then
     raise Exception.Create('BPIO2: a read with a start needs at least one write byte');
 
-  //Prefix, then the vector, padded to a multiple of four.
   total := Length(TPL_DATA) + WriteCount;
   while (total mod 4) <> 0 do Inc(total);
   SetLength(result, total);
@@ -1237,7 +1458,7 @@ end;
 function TBusPirate5.EncodeConfig(const AMode: string; SpeedHz: LongWord;
   DataBits: byte; ClockStretch, ClockPolarity, ClockPhase,
   ChipSelectIdle: boolean; SetBitorderMsb: boolean;
-  PsuEnable: boolean; PsuMv: LongWord; PsuMa: word; Pullups: boolean): TBytes;
+  Psu: TBP5PsuAction; PsuMv: LongWord; PsuMa: word; Pullups: boolean): TBytes;
 var
   total, n, i: integer;
 begin
@@ -1251,8 +1472,14 @@ begin
 
   PutU32(result, 88, PsuMv);
   PutU16(result, 92, PsuMa);
-  if SetBitorderMsb then result[94] := 1;      //bitorder_lsb stays 0
-  if PsuEnable then result[97] := 1 else result[96] := 1;
+  if SetBitorderMsb then result[94] := 1;
+  //The firmware reads mV and mA only with psu_enable, and with neither flag
+  //it leaves the supply as it is.
+  case Psu of
+    bp5psuOn:    result[97] := 1;
+    bp5psuOff:   result[96] := 1;
+    bp5psuLeave: ;
+  end;
   if Pullups then result[99] := 1 else result[98] := 1;
 
   PutU32(result, 104, SpeedHz);
@@ -1267,48 +1494,53 @@ begin
     result[119 + i] := byte(Ord(AMode[i]));
 end;
 
-function TBusPirate5.ReadStatus(VersionAndModeOnly: boolean): boolean;
+function TBusPirate5.ReadStatus(Quick: boolean): boolean;
 var
   raw: TBytes;
   body: integer;
 begin
   FStatus.Valid := false;
-  if not Transact(EncodeStatus(VersionAndModeOnly), BP5_RSP_STATUS, raw, body, 2500) then
+  if not Transact(EncodeStatus(Quick), BP5_RSP_STATUS, raw, body, 2500) then
     Exit(false);
 
   FStatus.FbMajor := FieldU8(raw, body, BP5_SR_FB_MAJOR);
   FStatus.FbMinor := FieldU16(raw, body, BP5_SR_FB_MINOR);
   FStatus.HwMajor := FieldU8(raw, body, BP5_SR_HW_MAJOR);
   FStatus.HwMinor := FieldU8(raw, body, BP5_SR_HW_MINOR);
-  FStatus.ModeCurrent := FieldStr(raw, body, BP5_SR_MODE_CURRENT);
+  FStatus.PsuEnabled := FieldBool(raw, body, BP5_SR_PSU_ENABLED);
+  FStatus.PsuSetMv := FieldU32(raw, body, BP5_SR_PSU_SET_MV);
+  FStatus.PsuSetMa := FieldU32(raw, body, BP5_SR_PSU_SET_MA);
+  FStatus.PsuMeasMv := FieldU32(raw, body, BP5_SR_PSU_MEAS_MV);
+  FStatus.PsuMeasMa := FieldU32(raw, body, BP5_SR_PSU_MEAS_MA);
+  FStatus.PsuError := FieldBool(raw, body, BP5_SR_PSU_ERROR);
 
-  if not VersionAndModeOnly then
+  //The quick read leaves the rest as the last full read found it.
+  if not Quick then
   begin
+    FStatus.ModeCurrent := FieldStr(raw, body, BP5_SR_MODE_CURRENT);
     FStatus.GitHash := FieldStr(raw, body, BP5_SR_GIT_HASH);
     FStatus.FwDate := FieldStr(raw, body, BP5_SR_FW_DATE);
     FStatus.Modes := FieldStrList(raw, body, BP5_SR_MODES, ', ');
     FStatus.MaxPacket := FieldU32(raw, body, BP5_SR_MAX_PACKET);
     FStatus.MaxWrite := FieldU32(raw, body, BP5_SR_MAX_WRITE);
     FStatus.MaxRead := FieldU32(raw, body, BP5_SR_MAX_READ);
-    FStatus.PsuEnabled := FieldBool(raw, body, BP5_SR_PSU_ENABLED);
-    FStatus.PsuSetMv := FieldU32(raw, body, BP5_SR_PSU_SET_MV);
-    FStatus.PsuSetMa := FieldU32(raw, body, BP5_SR_PSU_SET_MA);
-    FStatus.PsuMeasMv := FieldU32(raw, body, BP5_SR_PSU_MEAS_MV);
-    FStatus.PsuMeasMa := FieldU32(raw, body, BP5_SR_PSU_MEAS_MA);
-    FStatus.PsuError := FieldBool(raw, body, BP5_SR_PSU_ERROR);
     FStatus.PullupEnabled := FieldBool(raw, body, BP5_SR_PULLUP_ENABLED);
-    //Absent means the schema default, which is 0 - and 0 is not a usable
-    //limit, so fall back to the firmware's compiled-in constants.
+    //Absent means the schema default, which is 0, and 0 is not a usable
+    //limit, so fall back to the built-in copies of the firmware's constants.
     if FStatus.MaxPacket = 0 then FStatus.MaxPacket := BP5_MAX_PACKET;
     if FStatus.MaxWrite = 0 then FStatus.MaxWrite := BP5_MAX_WRITE;
     if FStatus.MaxRead = 0 then FStatus.MaxRead := BP5_MAX_READ;
   end;
 
+  CheckPsu;
   FStatus.Valid := true;
   result := true;
 end;
 
 function TBusPirate5.Open(const APortName: string; ABaudRate: LongWord): boolean;
+var
+  saved: integer;
+  ok: boolean;
 begin
   Close;
   if ABaudRate = 0 then ABaudRate := BP5_BAUD_DEFAULT;
@@ -1324,31 +1556,42 @@ begin
 
   //A device that is not in BPIO2 binmode either says nothing or answers with
   //something that is not a ResponsePacket. Either way it is not a port problem.
-  if not ReadStatus(true) then
+  //This first write gets the short timeout of the park writes: a Bus Pirate
+  //left in SUMP takes no more bytes after one request, and the default write
+  //timeout would hold the program for 15 s before this message.  By Dreg
+  saved := FPort.WriteTimeoutMs;
+  FPort.WriteTimeoutMs := BPSER_PARK_WRITE_MS;
+  try
+    ok := ReadStatus(true);
+  finally
+    FPort.WriteTimeoutMs := saved;
+  end;
+  if not ok then
   begin
     FPort.Close;
     FMode := bp5Closed;
+    //With the port closed there is no link to re-arm: the next DevOpen
+    //connects again, and must not say a transfer failed.
+    FDesynced := false;
     Exit(SetError('no BPIO2 answer on ' + APortName + '. ' +
       'On the Bus Pirate terminal port run "binmode", choose "BPIO2 flatbuffer ' +
       'interface" and answer y to "Save setting?". The factory default is the ' +
       'SUMP logic analyser, which uses the same port and will not answer here.'));
   end;
 
-  //Now that the link is proven, get the full picture including the limits. A
-  //failure here is not fatal - the probe already answered - but it must not be
-  //silently swallowed, because the limits fall back to the compiled defaults.
+  //The full status, the limits included. The probe already answered, so a
+  //failure here is not fatal, but it is logged: the limits then fall back to
+  //the built-in ones.
   if not ReadStatus(false) then
   begin
     Log(bp5lInfo, 'BusPirateV5+: full status read failed (' + FLastError +
                   '), using the built-in limits');
 
-    //Not fatal, but it must not survive as a desync flag. ReadStatus(true)
-    //already proved the link, and this second read is the larger one: it
-    //carries the mode name vector and the firmware strings, so it is the one
-    //that times out on a slow or noisy link. Leaving FDesynced set here makes
-    //Open return true and then have the very next EnterSPI refused by the
-    //guard, with nothing in the path to re-arm it, because DevOpen's Resync
-    //branch already ran before Connect.  By Dreg
+    //FDesynced must not stay set. The probe proved the link, and this read is
+    //the larger one (it has the mode list), so it is the one that times out on
+    //a slow or noisy link. Left set, FDesynced makes Open return true and the
+    //guard refuse the next request, and nothing re-arms the link: DevOpen and
+    //ReadyLink run Resync only before Connect.  By Dreg
     FPort.Purge;
     FDesynced := false;
     FPendingLen := 0;
@@ -1368,6 +1611,12 @@ begin
   FStopAlreadySent := false;
   FDesynced := false;
   FRecovering := false;
+  FRefusalLogged := false;
+  //The next session does not know what the supply was set to, so its first
+  //configuration sets it again: Off, or On, which restarts the target.
+  //FSupplyMayBeOn stays: nothing here switched the supply off.
+  FPsuKnown := false;
+  ClearPsuChanged;
   //Finalize first: the record holds four AnsiStrings, and zeroing their
   //pointers without dropping the references orphans the heap blocks.
   Finalize(FStatus);
@@ -1384,8 +1633,7 @@ end;
 
 function TBusPirate5.Resync: boolean;
 var
-  junk: integer;
-  wanted: TBP5Mode;
+  junk, saved: integer;
   ok: boolean;
   delim: byte;
 begin
@@ -1393,35 +1641,58 @@ begin
   //link is dirty for a reason this object never saw.
   if not FPort.IsOpen then Exit(false);
 
-  wanted := FMode;
   FRecovering := true;
   try
     //First close whatever half a frame the device may still be accumulating.
-    //A lone delimiter costs nothing when the device is idle, and it is the
-    //only way out when it is not: without it the device would splice the next
-    //request onto the tail of the broken one and reject both. This is the
-    //BPIO2 counterpart of walking the v3.x terminal back into bitbang.
+    //On an idle device a lone delimiter does no harm: the drain that follows
+    //throws away any answer. The firmware drops an unfinished frame 500 ms
+    //after its first byte (bpio.c), and until then it appends a new request to
+    //the broken frame and rejects both.
     delim := 0;
-    FPort.WriteAll(delim, 1);
+    //One byte needs no more than the park timeout: a device that takes no
+    //bytes would hold it for the whole default write timeout.
+    saved := FPort.WriteTimeoutMs;
+    FPort.WriteTimeoutMs := BPSER_PARK_WRITE_MS;
+    try
+      ok := FPort.WriteAll(delim, 1);
+    finally
+      FPort.WriteTimeoutMs := saved;
+    end;
+    if not ok then
+    begin
+      //A port that takes no byte at all cannot be re-armed: the device behind
+      //it went away (a Bus Pirate unplugged and plugged back in, which only
+      //opening the port again reaches) or stopped reading. The drain would
+      //only wait, and a status write would fail the same way: both only delay
+      //the reopen.  By Dreg
+      FLastError := 'the port takes no writes: ' + FPort.LastError;
+      FLastErrorLogged := false;
+    end
+    else
+    begin
+      //Then wait for it to finish answering (any error for that broken frame,
+      //or a reply Transact gave up on) and throw all of it away. The reply to a
+      //512 byte read can still be on its way.
+      junk := FPort.Drain(300, 5000);
+      FPort.Purge;
+      if junk > 0 then
+        Log(bp5lInfo, 'BusPirateV5+: discarded ' + IntToStr(junk) +
+                      ' late byte(s) from the aborted transfer');
+      FPendingLen := 0;
+      FCSAsserted := false;
+      FStopAlreadySent := false;
 
-    //Then wait for it to finish answering - the error for that broken frame,
-    //or a reply we gave up on - and throw all of it away. A 512 byte read is
-    //562 framed bytes and can still be on its way.
-    junk := FPort.Drain(300, 5000);
-    FPort.Purge;
-    if junk > 0 then
-      Log(bp5lInfo, 'BusPirateV5+: discarded ' + IntToStr(junk) +
-                    ' late byte(s) from the aborted transfer');
-    FPendingLen := 0;
-    FCSAsserted := false;
-    FStopAlreadySent := false;
+      ok := ReadStatus(true);
 
-    ok := ReadStatus(true);
-    if ok then
-      case wanted of
-        bp5SPI: ok := EnterSPI(FSPI);
-        bp5I2C: ok := EnterI2C(FI2C);
-      end;
+      //A transfer cut half way can leave chip select low or an I2C transaction
+      //open, and not every caller changes the mode after this. A bare stop ends
+      //both (bpio_spi.c, bpio_i2c.c) and leaves the supply alone. A refusal, a
+      //stuck I2C bus say, keeps the link in step, so a failed stop is followed
+      //by a second status read, and that read decides.
+      if ok and (FMode in [bp5SPI, bp5I2C]) then
+        if not DataExchange(false, true, 0, nil, 0, nil) then
+          ok := ReadStatus(true);
+    end;
   finally
     FRecovering := false;
   end;
@@ -1429,8 +1700,14 @@ begin
   FDesynced := not ok;
   if ok then
     Log(bp5lInfo, 'BusPirateV5+: link re-armed')
+  else if FLastErrorLogged then
+    //The log has the reason on the line before.
+    Log(bp5lError, 'BusPirateV5+: could not re-arm the link')
   else
+  begin
     Log(bp5lError, 'BusPirateV5+: could not re-arm the link: ' + FLastError);
+    FLastErrorLogged := true;
+  end;
   result := ok;
 end;
 
@@ -1452,18 +1729,30 @@ end;
 function TBusPirate5.EnterSPI(const Settings: TBP5SPISettings): boolean;
 var
   hz: LongWord;
+  psu: TBP5PsuAction;
 begin
   hz := Settings.SpeedHz;
   if hz < BP5_SPI_MIN_HZ then hz := BP5_SPI_MIN_HZ;
   if hz > BP5_SPI_MAX_HZ then hz := BP5_SPI_MAX_HZ;
 
+  psu := PsuActionFor(Settings.Power, Settings.PsuMv, Settings.PsuMa);
+  //Before sending: a reply that is lost does not mean the supply stayed off.
+  if psu = bp5psuOn then FSupplyMayBeOn := true;
   FPendingLen := 0;
   if not SendConfig(EncodeConfig('SPI', hz, 8, false,
                                  Settings.ClockPolarity, Settings.ClockPhase,
                                  Settings.ChipSelectIdleHigh, true,
-                                 Settings.Power, Settings.PsuMv,
+                                 psu, Settings.PsuMv,
                                  word(Settings.PsuMa), Settings.Pullups),
-                    'SPI configuration') then Exit(false);
+                    'SPI configuration') then
+  begin
+    //The device changes the mode first and the supply after it, so a request
+    //that failed with psu flags may have done either. One without them left
+    //the supply alone (bpio.c), and the next status read checks it anyway.
+    if psu <> bp5psuLeave then FPsuKnown := false;
+    Exit(false);
+  end;
+  NotePsuApplied(psu, Settings.Power, Settings.PsuMv, Settings.PsuMa);
 
   FMode := bp5SPI;
   FSPI := Settings;
@@ -1479,18 +1768,25 @@ end;
 function TBusPirate5.EnterI2C(const Settings: TBP5I2CSettings): boolean;
 var
   hz: LongWord;
+  psu: TBP5PsuAction;
 begin
   hz := Settings.SpeedHz;
-  //The firmware divides this by 1000 and then divides by the result; below
-  //1 kHz that is a division by zero on the device.
   if hz < BP5_I2C_MIN_HZ then hz := BP5_I2C_MIN_HZ;
   if hz > BP5_I2C_MAX_HZ then hz := BP5_I2C_MAX_HZ;
 
+  psu := PsuActionFor(Settings.Power, Settings.PsuMv, Settings.PsuMa);
+  //The same supply rules as EnterSPI.
+  if psu = bp5psuOn then FSupplyMayBeOn := true;
   FPendingLen := 0;
   if not SendConfig(EncodeConfig('I2C', hz, 8, false, false, false, true, true,
-                                 Settings.Power, Settings.PsuMv,
+                                 psu, Settings.PsuMv,
                                  word(Settings.PsuMa), Settings.Pullups),
-                    'I2C configuration') then Exit(false);
+                    'I2C configuration') then
+  begin
+    if psu <> bp5psuLeave then FPsuKnown := false;
+    Exit(false);
+  end;
+  NotePsuApplied(psu, Settings.Power, Settings.PsuMv, Settings.PsuMa);
 
   FMode := bp5I2C;
   FI2C := Settings;
@@ -1503,17 +1799,24 @@ end;
 
 function TBusPirate5.EnterHiZ: boolean;
 begin
-  //Everything off: this is the safe state to leave the device in.
+  //Everything off: this is the safe state to leave the device in. The HiZ
+  //mode change itself releases the pins and switches the supply and the
+  //pull-ups off (hiz_setup_exec); the flags say the same.
   if not SendConfig(EncodeConfig('HiZ', 20000, 8, false, false, false, true,
-                                 false, false, 0, 0, false),
-                    'HiZ configuration') then Exit(false);
+                                 false, bp5psuOff, 0, 0, false),
+                    'HiZ configuration') then
+  begin
+    FPsuKnown := false;
+    Exit(false);
+  end;
+  NotePsuApplied(bp5psuOff, false, 0, 0);
   FMode := bp5HiZ;
   FCSAsserted := false;
   FPendingLen := 0;
   result := true;
 end;
 
-//--- transfers ----------------------------------------------------------------
+//Transfers
 
 function TBusPirate5.DataExchange(StartMain, StopMain: boolean; BytesRead: word;
   WritePtr: Pointer; WriteCount: integer; ReadPtr: Pointer): boolean;
@@ -1522,7 +1825,7 @@ var
   body: integer;
   timeout: integer;
 begin
-  //Roughly 0.7 ms of protocol overhead plus the bus time, generously rounded.
+  //Protocol overhead plus the bus time, generously rounded.
   timeout := 3000 + (WriteCount + BytesRead) * 2;
 
   if not Transact(EncodeData(StartMain, StopMain, BytesRead, WritePtr, WriteCount),
@@ -1613,11 +1916,10 @@ begin
     stopMain := Deassert and last;
     startMain := not FCSAsserted;
 
-    //A read that opens the transaction must carry the command bytes with it.
+    //EncodeData refuses a read that opens with a start and writes nothing:
+    //assert CS on its own first.
     if startMain and (rslice > 0) and (wslice = 0) then
     begin
-      //Nothing to write but CS is idle: assert it on its own first, so the
-      //firmware never has to invent a read address out of an empty vector.
       if not DataExchange(true, false, 0, nil, 0, nil) then Exit(false);
       FCSAsserted := true;
       startMain := false;
@@ -1650,7 +1952,7 @@ begin
   result := true;
 end;
 
-//--- I2C ----------------------------------------------------------------------
+//I2C
 
 function TBusPirate5.I2CStart: boolean;
 begin
@@ -1682,14 +1984,14 @@ begin
   //No start flag, so the firmware sends the byte verbatim instead of masking
   //bit 0 as it would for an address.
   result := DataExchange(false, false, 0, @b, 1, nil);
-  //A NACK and a bus timeout are the same string on the wire, so the honest
-  //answer is "acknowledged only if the whole request succeeded". A NACK is a
-  //normal answer though - acknowledge polling produces one per attempt - so
-  //the call itself still counts as having worked, and nothing is logged.
+  //A NACK and a bus timeout are the same string on the wire, so Acked means
+  //the whole request succeeded. A NACK is a normal answer (acknowledge polling
+  //gets one per attempt), so the call still succeeds and nothing is logged.
   Acked := result;
   if not result and (not FDesynced) then
   begin
     FLastError := 'I2C write not acknowledged (NACK or bus timeout)';
+    FLastErrorLogged := false;
     result := true;
   end;
 end;
@@ -1714,16 +2016,25 @@ function TBusPirate5.I2CWriteRead(DevAddr: byte; WritePtr: Pointer;
   WriteCount: integer; ReadPtr: Pointer; ReadCount: integer): boolean;
 var
   buf: TBytes;
+  first, chunk, done: integer;
+  last, readStarted, refused, acked, msgLogged: boolean;
+  dst: Pointer;
+  probe: byte;
+  msg: string;
+  tries: integer;
 begin
+  readStarted := false;
   if FMode <> bp5I2C then Exit(SetError('not in I2C mode'));
   if WriteCount < 0 then WriteCount := 0;
   if ReadCount < 0 then ReadCount := 0;
-  if ReadCount > BP5_MAX_READ then
-    Exit(SetError('I2C read of ' + IntToStr(ReadCount) + ' bytes exceeds ' +
-                  IntToStr(BP5_MAX_READ)));
-  if WriteCount + 1 > BP5_MAX_WRITE then
-    Exit(SetError('I2C write of ' + IntToStr(WriteCount) + ' bytes exceeds ' +
-                  IntToStr(BP5_MAX_WRITE - 1)));
+  //A request carries at most BP5_MAX_WRITE bytes out and BP5_MAX_READ back,
+  //so more goes as several requests on one transaction: a start only on the
+  //first, a stop only on the last, and every byte read before that one
+  //acknowledged (bpio_i2c.c). The repeated start of a write then read only
+  //happens inside one request, so the write half of one has to fit.
+  if (WriteCount + 1 > BP5_MAX_WRITE) and (ReadCount > 0) then
+    Exit(SetError('I2C write of ' + IntToStr(WriteCount) + ' bytes before a read ' +
+                  'exceeds ' + IntToStr(BP5_MAX_WRITE - 1)));
 
   //The address byte leads the write vector; the firmware masks bit 0 for the
   //write phase and sets it for the read phase after its own repeated start.
@@ -1732,21 +2043,97 @@ begin
   if (WriteCount > 0) and (WritePtr <> nil) then
     Move(PByte(WritePtr)^, buf[1], WriteCount);
 
-  result := DataExchange(true, true, word(ReadCount), @buf[0], Length(buf), ReadPtr);
+  if ReadCount = 0 then
+  begin
+    done := 0;
+    repeat
+      chunk := Length(buf) - done;
+      if chunk > BP5_MAX_WRITE then chunk := BP5_MAX_WRITE;
+      last := done + chunk >= Length(buf);
+      result := DataExchange(done = 0, last, 0, @buf[done], chunk, nil);
+      Inc(done, chunk);
+    until (not result) or last;
+  end
+  else
+  begin
+    first := ReadCount;
+    if first > BP5_MAX_READ then first := BP5_MAX_READ;
+    result := DataExchange(true, first = ReadCount, word(first), @buf[0], Length(buf), ReadPtr);
+    readStarted := result;
+    done := first;
+    while result and (done < ReadCount) do
+    begin
+      chunk := ReadCount - done;
+      if chunk > BP5_MAX_READ then chunk := BP5_MAX_READ;
+      if ReadPtr <> nil then dst := PByte(ReadPtr) + done else dst := nil;
+      result := DataExchange(false, done + chunk >= ReadCount, word(chunk), nil, 0, dst);
+      Inc(done, chunk);
+    end;
+  end;
   if not result then
   begin
-    //Say which device did not answer, but never at the cost of the reason. This
-    //used to overwrite the real message unconditionally, which turned a plain
-    //"read of 2048 bytes exceeds 512" into "no I2C answer from device $A0" and
-    //sent the reader looking at their wiring.  By Dreg
-    if FLastError = '' then
-      FLastError := 'no I2C answer from device $' + IntToHex(DevAddr, 2)
-    else
-      FLastError := 'device $' + IntToHex(DevAddr, 2) + ': ' + FLastError;
+    //A refusal the I2C handler answered with, before any byte was read: the
+    //firmware gives a NACK of the address, a NACK of a data byte and a bus
+    //timeout the same "Protocol request failed" (bpio.c). Its other errors,
+    //such as no handler for the mode, keep their own text.  By Dreg
+    refused := (not FDesynced) and (not FLastErrorLogged) and (not readStarted) and
+               (FLastError = BP5_REQUEST_FAILED);
+
+    //Name the device and keep the reason. A reason SetError has logged already
+    //gets a line of its own naming the device, so the reason is not logged
+    //twice.  By Dreg
+    msg := 'device $' + IntToHex(DevAddr, 2) + ': ' + FLastError;
+    msgLogged := FLastErrorLogged;
+    if msgLogged then
+      Log(bp5lError, 'BusPirateV5+: the I2C transfer to device $' +
+                     IntToHex(DevAddr, 2) + ' failed');
 
     //Every firmware error path returns before its cleanup label, so a failed
-    //transfer leaves the bus held. Release it.
-    if not FDesynced then DataExchange(false, true, 0, nil, 0, nil);
+    //transfer leaves the bus held. Release it. After a read piece that went
+    //through, the device is still sending with its last byte acknowledged,
+    //so read one more and NACK it before the stop.
+    if not FDesynced then
+      if readStarted then
+        DataExchange(false, true, 1, nil, 0, nil)
+      else
+        DataExchange(false, true, 0, nil, 0, nil);
+
+    //As on the v3: when bytes followed the address, the address goes out again
+    //alone. A device that takes it now refused what came after (its WP pin
+    //high, a protected area), unless it was only busy the first time.  By Dreg
+    if refused and (not FDesynced) then
+    begin
+      acked := false;
+      if WriteCount > 0 then
+      begin
+        //Bytes it took before the NACK start an EEPROM's write cycle at the
+        //stop above, and the chip ignores its address until that ends, 5 ms
+        //at most on Microchip's AT24C256C. So the probe goes up to 8 times, two
+        //requests each: a timer would not do, GetTickCount64 moves in 15 or
+        //16 ms steps.
+        probe := DevAddr and $FE;
+        for tries := 1 to 8 do
+        begin
+          acked := DataExchange(true, true, 0, @probe, 1, nil);
+          if acked or FDesynced then Break;
+          DataExchange(false, true, 0, nil, 0, nil);
+          if FDesynced then Break;
+        end;
+      end;
+      if acked then
+        msg := 'device $' + IntToHex(DevAddr, 2) +
+               ' acknowledged its address but refused the data after it'
+      else
+        msg := 'no I2C answer from device $' + IntToHex(DevAddr, 2);
+    end;
+
+    //A release or a probe that lost the link logged its own reason, and that
+    //reason is what the caller gets.
+    if not FDesynced then
+    begin
+      FLastError := msg;
+      FLastErrorLogged := msgLogged;
+    end;
   end;
 end;
 
@@ -1782,13 +2169,22 @@ begin
     end;
   end;
 
+  //Every address answering means SDA reads low: the acknowledge is the SDA
+  //level sampled after the address, and on a Bus Pirate 7 the pull-ups off
+  //means 1M pull-downs on every line (p_pullups.c). Same guard as the v3.x
+  //scanner.  By Dreg
+  if (count > 0) and (count = LastAddr - FirstAddr + 1) then
+  begin
+    SetLength(Found, 0);
+    Exit(SetError('every address answered, which means SDA reads low rather than ' +
+                  'a busy bus: switch the pull-ups on, or check the wiring'));
+  end;
+
   SetLength(Found, count);
   result := true;
 end;
 
-//============================================================================
-//  Device enumeration
-//============================================================================
+//Device enumeration
 
 procedure BP5GetSerialPorts(AList: TStrings);
 
@@ -1882,10 +2278,9 @@ begin
       reg.GetKeyNames(ifaceKeys);
       reg.CloseKey;
 
-      //Find every composite interface of the Bus Pirate rather than assuming a
-      //fixed instance suffix: the child key names differ between machines and
-      //between Windows versions, and hardcoding one is how this breaks on
-      //somebody else's PC.
+      //The loop reads every interface key of the Bus Pirate and every child
+      //under it, with no fixed instance suffix: the child key names differ
+      //between machines and between Windows versions.
       for i := 0 to ifaceKeys.Count - 1 do
       begin
         keyName := ifaceKeys[i];
@@ -1925,9 +2320,9 @@ begin
       end;
 
       //The USB serial string names the generation: 5buspirate, 6buspirate...
-      //It lives under the base key, whose children carry a ParentIdPrefix that
-      //matches the group. Best effort only - a build without the manufacturing
-      //test mode ships a hex serial instead.
+      //It is the name of a child key of BP5_USB_ID, whose ParentIdPrefix value
+      //matches the group. Best effort only: outside the manufacturing test mode
+      //the serial is the chip ID in hex by default.
       children.Clear;
       if reg.OpenKeyReadOnly(enumBase + '\' + BP5_USB_ID) then
       begin
@@ -1947,13 +2342,13 @@ begin
       end;
 
       //Enum\USB keeps stale entries for ever, so presence comes from the live
-      //port list, never from the registry.
+      //port list, never from those keys.
       for n := 0 to High(result) do
         result[n].Present := (result[n].DataPort <> '') and
                              (present.IndexOf(result[n].DataPort) >= 0);
     except
-      //A locked or ACL-denied key must degrade to "no annotation", never to a
-      //crash: the menu still lists every port from BP5GetSerialPorts.
+      //An exception from the registry must degrade to "no annotation", never
+      //to a crash: the menu still lists every port from BP5GetSerialPorts.
       on E: Exception do SetLength(result, 0);
     end;
   finally
@@ -1994,13 +2389,11 @@ begin
   end;
 end;
 
-//============================================================================
-//  TBusPirate5Hardware
-//============================================================================
+//TBusPirate5Hardware
 
-//Address of the first element, or nil for an empty slice. Callers pass buffers
-//that are almost always larger than Count, and sometimes a bare byte variable,
-//so Count is what decides and never Length().
+//Address of the first element, or nil when Count is under 1 or the buffer is
+//empty. The slice is Count bytes long, never Length(): callers pass buffers
+//that are almost always larger than Count, and sometimes a bare byte variable.
 function SlicePtr(const Buffer: array of byte; Count: integer): Pointer;
 begin
   if (Count > 0) and (Length(Buffer) > 0) then
@@ -2009,7 +2402,6 @@ begin
     result := nil;
 end;
 
-//Tag of whichever child of a submenu is checked.
 function CheckedTag(Parent: TMenuItem; Default: PtrInt): PtrInt;
 var
   i: integer;
@@ -2028,6 +2420,7 @@ begin
   FBP.OnLog := @HandleLog;
   FDevOpened := false;
   FStrError := '';
+  FErrorLogged := false;
   FOpenPort := '';
   FAppliedConfig := '';
 end;
@@ -2048,27 +2441,34 @@ begin
   inherited Destroy;
 end;
 
-//Puts the pins high impedance and the supply off, even when the link is out of
-//step - which is exactly when it matters, because a desynchronised link
-//refuses every request and would otherwise leave the target powered.
+//Puts the pins high impedance and the supply off, also when the link is out of
+//step and refuses every request. Resync only proves the link, so nothing
+//switches the supply on again on the way, and the HiZ mode change releases
+//chip select itself (spi_cleanup). A dead device costs one timeout and one
+//Resync, about 6 s, also at exit; the short write timeout keeps a hung one
+//that takes no bytes at about 2 s.
 function TBusPirate5Hardware.SafePowerDown: boolean;
+var
+  saved: integer;
 begin
   result := false;
   if not FBP.IsOpen then Exit;
 
-  if FBP.Desynced then
-    if not FBP.Resync then
+  saved := FBP.Port.WriteTimeoutMs;
+  FBP.Port.WriteTimeoutMs := BPSER_PARK_WRITE_MS;
+  try
+    if (not FBP.Desynced) or FBP.Resync then
     begin
-      LogPrint('BusPirateV5+: could not re-arm the link, so the target may ' +
-               'still be powered - unplug the Bus Pirate to be sure');
-      Exit;
+      if FBP.EnterHiZ then Exit(true);
+      //One more go once the line is clean, whatever the first failure was.
+      if FBP.Resync and FBP.EnterHiZ then Exit(true);
     end;
+  finally
+    FBP.Port.WriteTimeoutMs := saved;
+  end;
 
-  if FBP.Mode = bp5SPI then FBP.SPIReleaseCS;
-  result := FBP.EnterHiZ;
-  if not result then
-    LogPrint('BusPirateV5+: could not switch to HiZ (' + FBP.LastError +
-             '), the target may still be powered');
+  LogPrint('BusPirateV5+: could not switch to HiZ (' + FBP.LastError +
+           '), the target may still be powered: unplug the Bus Pirate to be sure');
 end;
 
 procedure TBusPirate5Hardware.HandleLog(Level: TBP5LogLevel; const Msg: string);
@@ -2079,16 +2479,59 @@ end;
 function TBusPirate5Hardware.Complain(const Msg: string): boolean;
 begin
   FStrError := Msg;
+  FErrorLogged := true;
   //Anything that went wrong makes the session suspect, so the next DevOpen
-  //re-arms the device instead of trusting a liveness check.
+  //configures the device again instead of taking the fast path.
   FAppliedConfig := '';
-  LogPrint('BusPirateV5+: ' + Msg);
+  //The engine's own error was logged where it happened, unless it was one it
+  //keeps quiet (a device's refusal), which is said here.
+  if (Msg <> FBP.LastError) or (not FBP.LastErrorLogged) then
+    LogPrint('BusPirateV5+: ' + Msg);
   result := false;
+end;
+
+//Why a status read found the supply in another state than the one this
+//session set, with the flag cleared. A supply that is still on goes off first,
+//as the firmware does with its own faults: with no current limit nothing else
+//would stop it feeding a short.
+function TBusPirate5Hardware.TakeSupplyChange: string;
+begin
+  result := FBP.PsuChangeWhy;
+  FBP.ClearPsuChanged;
+  //HiZ is not the mode the next operation wants, and the supply has to be set
+  //again in any case.
+  FAppliedConfig := '';
+  if FBP.Status.PsuEnabled and FBP.EnterHiZ then
+    result := result + '. The supply is off now';
+end;
+
+//Fail the operation and say why. Nothing switches the supply on again until
+//the next operation or I2C scan applies the menu settings.
+function TBusPirate5Hardware.SupplyChanged: boolean;
+begin
+  result := Complain(TakeSupplyChange + '. Check the target, then run the ' +
+                     'operation again: it applies the BusPirateV5+ menu settings');
+end;
+
+//VOUT read low right after a configuration. With no current limit psu_enable
+//lets the supply settle for 10 ms only (psu.c), so a target with a lot of
+//capacitance can still be charging: read once more after the wait psu_enable
+//uses with a limit. False only when the device stopped answering.
+function TBusPirate5Hardware.RecheckSag: boolean;
+begin
+  FBP.ClearPsuChanged;
+  Sleep(BP5_PSU_SETTLE_MS);
+  result := FBP.Ping;
 end;
 
 function TBusPirate5Hardware.GetLastError: string;
 begin
   result := FStrError;
+end;
+
+function TBusPirate5Hardware.ErrorWasLogged: boolean;
+begin
+  result := FErrorLogged;
 end;
 
 function TBusPirate5Hardware.MaxRead: integer;
@@ -2110,8 +2553,8 @@ end;
 
 function TBusPirate5Hardware.SelectedSPIHz: LongWord;
 begin
-  //Same default as the v3.x back end: slow enough to work on any wiring.
-  //The menu goes to 16 MHz for anyone who wants it.
+  //Same default as the v3.x back end: slow enough to work on any wiring. The
+  //menu goes up to 16 MHz.
   result := LongWord(CheckedTag(MainForm.MenuBP5SPIClock, 125000));
   if result < BP5_SPI_MIN_HZ then result := 125000;
 end;
@@ -2157,12 +2600,12 @@ begin
   result.Power := MainForm.MenuBP5Power.Checked;
   result.PsuMv := SelectedPsuMv;
   result.PsuMa := SelectedPsuMa;
-  //I2C without pull-ups is not a bus, so they follow the menu but the pull-up
-  //bank is referenced to VOUT and needs the supply on to do anything.
+  //I2C needs pull-ups, and these follow the menu. They are fed from VOUT, so
+  //they do nothing without a supply there, the Bus Pirate's or the target's.
   result.Pullups := MainForm.MenuBP5Pullups.Checked;
 end;
 
-//Anything in here changing means the device has to be reconfigured.
+//DevOpen configures the device again when any of these values changes.
 function TBusPirate5Hardware.ConfigSignature: string;
 begin
   if WantI2C then
@@ -2181,23 +2624,65 @@ begin
   FAppliedConfig := '';
   FOpenPort := '';
 
-  if not FBP.Open(APort) then Exit(Complain(FBP.LastError));
-
-  LogPrint(Format('BusPirateV5+: Bus Pirate %d REV%d, firmware %s',
-    [FBP.Status.HwMajor, FBP.Status.HwMinor, FBP.Status.FwDate]));
+  if not FBP.Open(APort) then
+  begin
+    Complain(FBP.LastError);
+    //A session that died with the supply on is gone now, and nothing will
+    //switch it off.
+    if FBP.SupplyMayBeOn then
+      LogPrint('BusPirateV5+: the last session ended with the target supply on, ' +
+               'so the target may still be powered: unplug the Bus Pirate to be sure');
+    Exit(false);
+  end;
+  //Open has logged the hardware, the port and the firmware date.
 
   FOpenPort := APort;
   result := true;
 end;
 
+//The session of a menu command that runs outside an operation (Show pin
+//labels, the I2C scan, Device info): opened when there is none, re-armed when
+//it is out of sync, and otherwise checked with a status read, as DevOpen does.
+//The port of a Bus Pirate unplugged and plugged back in fails every write, so a
+//failed read opens it again, and a supply change since the last operation
+//shows in PsuChanged. False with the reason logged and in FBP.LastError.
+//By Dreg
+function TBusPirate5Hardware.ReadyLink(const APort: string): boolean;
+var
+  needConnect: boolean;
+begin
+  needConnect := (not FBP.IsOpen) or (APort <> FOpenPort);
+  if not needConnect then
+  begin
+    if FBP.Desynced then
+    begin
+      FAppliedConfig := '';
+      needConnect := not FBP.Resync;
+    end
+    else
+    begin
+      FBP.SPIDropQueued;
+      if not FBP.Ping then
+      begin
+        LogPrint('BusPirateV5+: device stopped answering, reconnecting');
+        FAppliedConfig := '';
+        needConnect := not (FBP.Desynced and FBP.Resync);
+      end;
+    end;
+  end;
+  result := (not needConnect) or Connect(APort);
+end;
+
 function TBusPirate5Hardware.DevOpen: boolean;
 var
   port, signature: string;
-  needConnect, lostPing: boolean;
+  needConnect, lostPing, armed: boolean;
 begin
   FStrError := '';
+  FErrorLogged := false;
   FDevOpened := false;
   lostPing := false;
+  armed := false;
   FBP.Verbose := MainForm.MenuBP5Verbose.Checked;
 
   port := Trim(main.BusPirate5_COMPort);
@@ -2205,28 +2690,34 @@ begin
 
   signature := ConfigSignature;
 
-  //A transfer that died left the device mid-answer. Get the stream back in
-  //step before anything else is considered.
+  //A failed transfer can leave the device mid-answer. Get the stream back in
+  //step before anything else.
   if FBP.Desynced then
   begin
     LogPrint('BusPirateV5+: the last transfer failed, re-arming the link');
     FAppliedConfig := '';
     if not FBP.Resync then
       if not Connect(port) then Exit(false);
+    //Resync and Open have both just read the status.
+    armed := true;
   end;
 
   //Fast path: same port, same settings, device still answering.
   if FBP.IsOpen and (port = FOpenPort) and (signature = FAppliedConfig) and
      (not MainForm.MenuBP5ResetEach.Checked) then
   begin
+    //Bytes still queued belong to an abandoned transfer. Ping refuses to run
+    //with them there, and that reads as "stopped answering" and costs a
+    //reconnect.
+    FBP.SPIDropQueued;
     if FBP.Ping then
     begin
       //An operation cancelled mid transaction can leave CS asserted. Releasing
-      //it is a transaction of its own, so it can fail and desync the link. Fall
-      //through to the reconnect when it does, rather than returning a link this
-      //function already knows is broken.  By Dreg
+      //it is a transaction of its own, which can fail and desync the link, so a
+      //failure falls through to the reconnect.  By Dreg
       if (FBP.Mode <> bp5SPI) or FBP.SPIReleaseCS then
       begin
+        if FBP.PsuChanged then Exit(SupplyChanged);
         FDevOpened := true;
         Exit(true);
       end;
@@ -2235,14 +2726,29 @@ begin
     end
     else
     LogPrint('BusPirateV5+: device stopped answering, reconnecting');
-    //A failed Ping desynchronises the link, so every later request would be
-    //refused. Say so here, or the reconnect this line promises never happens
-    //and the operation dies on the guard instead.
+    //A failed Ping desynchronises the link, and the guard refuses every later
+    //request. With lostPing set, DevOpen re-arms the link or reconnects below.
     lostPing := true;
   end;
 
   needConnect := MainForm.MenuBP5ResetEach.Checked or lostPing or
                  (not FBP.IsOpen) or (port <> FOpenPort);
+
+  //An open session the fast path did not check (new settings, an operation
+  //that failed, Show pin labels, the I2C scan) is checked the same way: the
+  //port of a Bus Pirate unplugged and plugged back in fails every write until
+  //it is opened again, and a supply change since the last operation has to be
+  //said before the configuration below switches the supply on again.  By Dreg
+  if (not needConnect) and (not armed) then
+  begin
+    FBP.SPIDropQueued;
+    if not FBP.Ping then
+    begin
+      LogPrint('BusPirateV5+: device stopped answering, reconnecting');
+      lostPing := true;
+      needConnect := true;
+    end;
+  end;
 
   if needConnect then
   begin
@@ -2254,6 +2760,9 @@ begin
       if not Connect(port) then Exit(false);
   end;
 
+  //Resync and Ping read the supply as well.
+  if FBP.PsuChanged then Exit(SupplyChanged);
+
   //Drop the claim before touching the device: a mode change that dies half way
   //must not leave a signature the next DevOpen would fast path on.
   FAppliedConfig := '';
@@ -2264,6 +2773,15 @@ begin
   end
   else
     if not FBP.EnterSPI(SPISettings) then Exit(Complain(FBP.LastError));
+
+  //The configuration's answer carries no supply state, and under BPIO2 the
+  //firmware does not check VOUT (bpio.c), so read the supply now.
+  if FBP.PsuOn then
+  begin
+    if not FBP.Ping then Exit(Complain(FBP.LastError));
+    if FBP.PsuSagging and (not RecheckSag) then Exit(Complain(FBP.LastError));
+    if FBP.PsuChanged then Exit(SupplyChanged);
+  end;
 
   FAppliedConfig := signature;
   FDevOpened := true;
@@ -2278,8 +2796,17 @@ begin
   //Leave CS idle so the chip is never left selected between operations.
   if FBP.Mode = bp5SPI then FBP.SPIReleaseCS;
 
-  //Only tear the link down when the user asked for it. Keeping it up is what
-  //makes the next operation start instantly.
+  //An operation that lost its supply half way still ends with "Done", so look
+  //once more. The next DevOpen applies the menu settings again.
+  if FBP.PsuOn and FBP.Ping and FBP.PsuChanged then
+  begin
+    LogPrint('BusPirateV5+: ' + TakeSupplyChange +
+             '. The result of this operation cannot be trusted');
+    FAppliedConfig := '';
+  end;
+
+  //Only tear the link down when the user asked for it. An open link lets the
+  //next operation skip the handshake.
   if MainForm.MenuBP5ResetEach.Checked then
   begin
     SafePowerDown;
@@ -2289,31 +2816,43 @@ begin
   end;
 end;
 
-procedure TBusPirate5Hardware.Disconnect;
+function TBusPirate5Hardware.Disconnect: TBP5Park;
 begin
   FDevOpened := false;
-  if FBP.IsOpen then SafePowerDown;
+  if not FBP.IsOpen then
+    result := bp5pkNoSession
+  else if SafePowerDown then
+    result := bp5pkParked
+  else
+    result := bp5pkFailed;
   FBP.Close;
   FOpenPort := '';
   FAppliedConfig := '';
 end;
 
-//--- SPI ----------------------------------------------------------------------
+function TBusPirate5Hardware.SupplyMayBeOn: boolean;
+begin
+  result := (not FBP.IsOpen) and FBP.SupplyMayBeOn;
+end;
+
+//SPI
 
 function TBusPirate5Hardware.SPIInit(speed: integer): boolean;
 begin
   //The clock comes from the menu and DevOpen has already sent it; the argument
   //is an opaque menu tag, not Hz.
   result := FDevOpened and (FBP.Mode = bp5SPI);
-  if not result then FStrError := 'SPI mode is not active';
+  if not result then
+  begin
+    FStrError := 'SPI mode is not active';
+    FErrorLogged := false;
+  end;
 end;
 
 procedure TBusPirate5Hardware.SPIDeinit;
 begin
   if not FDevOpened then Exit;
   if FBP.Mode <> bp5SPI then Exit;
-  //Teardown: drop anything queued rather than clocking an abandoned fragment
-  //onto the chip as a complete CS framed transaction.
   FBP.SPIReleaseCS;
 end;
 
@@ -2356,7 +2895,7 @@ begin
   result := BufferLen;
 end;
 
-//--- I2C ----------------------------------------------------------------------
+//I2C
 
 procedure TBusPirate5Hardware.I2CInit;
 begin
@@ -2365,7 +2904,7 @@ end;
 
 procedure TBusPirate5Hardware.I2CDeinit;
 begin
-  //Nothing to undo, the mode stays valid until the link is closed.
+  //Nothing to undo: the mode stays valid until the link is closed.
 end;
 
 procedure TBusPirate5Hardware.I2CStart;
@@ -2421,7 +2960,7 @@ begin
   result := WBufferLen + RBufferLen;
 end;
 
-//--- MICROWIRE ----------------------------------------------------------------
+//Microwire
 
 //BPIO2 cannot do Microwire, for three independent reasons: the firmware's
 //3WIRE handlers are compiled but not wired into its BPIO dispatch table, the
@@ -2429,7 +2968,8 @@ end;
 //the only way to sample the busy pin would be a USB round trip per bit.
 const
   MW_UNSUPPORTED = 'Microwire is not available on the Bus Pirate v5+ (BPIO2). ' +
-                   'Use a Bus Pirate v3.x for Microwire parts.';
+                   'Use a CH341a, CH347T, UsbAsp, AVRISP-MKII, Arduino or ' +
+                   'FT232H for Microwire parts.';
 
 function TBusPirate5Hardware.MWInit(speed: integer): boolean;
 begin
@@ -2444,6 +2984,7 @@ function TBusPirate5Hardware.MWRead(CS: byte; BufferLen: integer;
   var buffer: array of byte): integer;
 begin
   FStrError := MW_UNSUPPORTED;
+  FErrorLogged := false;
   result := -1;
 end;
 
@@ -2451,6 +2992,7 @@ function TBusPirate5Hardware.MWWrite(CS: byte; BitsWrite: byte;
   buffer: array of byte): integer;
 begin
   FStrError := MW_UNSUPPORTED;
+  FErrorLogged := false;
   result := -1;
 end;
 
@@ -2459,29 +3001,32 @@ begin
   result := false;
 end;
 
-//--- extras -------------------------------------------------------------------
+//Extras
 
 function TBusPirate5Hardware.DeviceReport: string;
+var
+  check, port: string;
+  wasOn: boolean;
 begin
-  if not FBP.IsOpen then
-  begin
-    if Trim(main.BusPirate5_COMPort) = '' then Exit('No COM port selected');
-    if not Connect(Trim(main.BusPirate5_COMPort)) then
-      Exit('Cannot reach the device: ' + FBP.LastError);
-  end
-  else
-    //Otherwise a single failed transfer would leave this menu command dead
-    //for the rest of the session.
-    if FBP.Desynced then
-    begin
-      FAppliedConfig := '';
-      if not FBP.Resync then
-        if not Connect(Trim(main.BusPirate5_COMPort)) then
-          Exit('Cannot reach the device: ' + FBP.LastError);
-    end;
+  port := Trim(main.BusPirate5_COMPort);
+  if port = '' then Exit('No COM port selected');
+  //Otherwise a failed transfer, or a Bus Pirate plugged back in, would leave
+  //this menu command dead for the rest of the session.
+  if not ReadyLink(port) then
+    Exit('Cannot reach the device: ' + FBP.LastError);
 
   if not FBP.RefreshStatus then
     Exit('Cannot read the device status: ' + FBP.LastError);
+
+  //Act on a supply change now, as the next operation would: a short fed with
+  //no current limit should not wait for it. Then show the supply as it is.
+  check := '';
+  if FBP.PsuChanged then
+  begin
+    wasOn := FBP.Status.PsuEnabled;
+    check := TakeSupplyChange;
+    if wasOn then FBP.RefreshStatus;
+  end;
 
   result :=
     'Port          : ' + FBP.Port.PortName + LineEnding +
@@ -2504,7 +3049,10 @@ begin
     'Supply fault  : ' + BoolToStr(FBP.Status.PsuError, 'YES - check the target!', 'no') + LineEnding +
     'Pull-ups      : ' + BoolToStr(FBP.Status.PullupEnabled, 'on', 'off') + LineEnding;
 
-  //The firmware hardcodes its version fields to zero, so they are never shown.
+  if check <> '' then
+    result := result + 'Supply check  : ' + check + LineEnding;
+
+  //The firmware's own version fields are hardcoded to 0, so they are not shown.
 end;
 
 function TBusPirate5Hardware.ScanI2CBus(out Found: TBytes; out ErrMsg: string): boolean;
@@ -2523,31 +3071,38 @@ begin
     Exit;
   end;
 
-  if (not FBP.IsOpen) or (port <> FOpenPort) then
+  //A previous failure, or a Bus Pirate plugged back in, must not make the
+  //scanner unavailable, and a supply change since the last operation is said
+  //below before the scan configures anything.
+  if not ReadyLink(port) then
   begin
-    if not Connect(port) then
+    ErrMsg := FBP.LastError;
+    Exit;
+  end;
+
+  //The scan runs whatever the SPI/I2C radio says, so leave the session dirty:
+  //the next operation applies the user's own settings again.
+  FAppliedConfig := '';
+
+  //The same supply checks as DevOpen, before and after the configuration.
+  if not FBP.PsuChanged then
+  begin
+    if not FBP.EnterI2C(I2CSettings) then
     begin
       ErrMsg := FBP.LastError;
       Exit;
     end;
-  end
-  else
-    //A previous failure must not make the scanner permanently unavailable.
-    if FBP.Desynced then
-      if not FBP.Resync then
-        if not Connect(port) then
-        begin
-          ErrMsg := FBP.LastError;
-          Exit;
-        end;
-
-  //The scan runs whatever the SPI/I2C radio says, so leave the session dirty
-  //on purpose: the next real operation re-arms the user's own settings.
-  FAppliedConfig := '';
-
-  if not FBP.EnterI2C(I2CSettings) then
+    if FBP.PsuOn then
+      if (not FBP.Ping) or (FBP.PsuSagging and (not RecheckSag)) then
+      begin
+        ErrMsg := FBP.LastError;
+        Exit;
+      end;
+  end;
+  if FBP.PsuChanged then
   begin
-    ErrMsg := FBP.LastError;
+    ErrMsg := TakeSupplyChange + '. Check the target, then scan again: the scan ' +
+              'applies the BusPirateV5+ menu settings';
     Exit;
   end;
 
@@ -2556,7 +3111,94 @@ begin
     ErrMsg := FBP.LastError;
     Exit;
   end;
+
+  //A supply that went off half way hides the devices after that point, and a
+  //Bus Pirate that no longer answers cannot say whether that happened.
+  if FBP.PsuOn then
+  begin
+    if not FBP.Ping then
+    begin
+      SetLength(Found, 0);
+      ErrMsg := FBP.LastError;
+      Exit;
+    end;
+    if FBP.PsuChanged then
+    begin
+      SetLength(Found, 0);
+      ErrMsg := 'The scan result cannot be trusted: ' + TakeSupplyChange +
+                '. Check the target, then scan again';
+      Exit;
+    end;
+  end;
   result := true;
+end;
+
+//The device's screen labels each pin with what the mode uses it for. This
+//sets the mode of the bus picked in the window, SPI or I2C, with the supply
+//and the pull-ups off in the same request, so the labels show where each wire
+//goes with the Bus Pirate's supply off. A target with its own supply on VOUT
+//still gets the mode's outputs (SPI drives CS, CLK and MOSI). The next
+//operation sets the device up again as the menu says.
+//By Dreg
+function TBusPirate5Hardware.ShowPinLabels(out ErrMsg: string): boolean;
+var
+  port: string;
+  spi: TBP5SPISettings;
+  i2c: TBP5I2CSettings;
+begin
+  ErrMsg := '';
+  result := false;
+  FBP.Verbose := MainForm.MenuBP5Verbose.Checked;
+
+  port := Trim(main.BusPirate5_COMPort);
+  if port = '' then
+  begin
+    ErrMsg := 'No COM port selected. Pick one in the BusPirateV5+ menu.';
+    Exit;
+  end;
+
+  //A session the last operation left open has not read the status since, so a
+  //tripped current limit or a supply changed on the device's own terminal is
+  //still unknown, and switching the supply off below would hide it.
+  if not ReadyLink(port) then
+  begin
+    ErrMsg := 'see the log above';
+    Exit;
+  end;
+
+  //Not the operation's setup: the next operation configures the device again.
+  FAppliedConfig := '';
+
+  if FBP.PsuChanged then
+  begin
+    LogPrint('BusPirateV5+: ' + FBP.PsuChangeWhy + '. Check the target: the next ' +
+             'operation switches the supply on again as the menu says');
+    FBP.ClearPsuChanged;
+  end;
+
+  if WantI2C then
+  begin
+    i2c := I2CSettings;
+    i2c.Power := false;
+    i2c.Pullups := false;
+    result := FBP.EnterI2C(i2c);
+  end
+  else
+  begin
+    spi := SPISettings;
+    spi.Power := false;
+    spi.Pullups := false;
+    result := FBP.EnterSPI(spi);
+  end;
+  if not result then
+  begin
+    //A reason the engine has logged already is not said twice.
+    if FBP.LastErrorLogged then ErrMsg := 'see the log above' else ErrMsg := FBP.LastError;
+    //The request may have changed the mode and left the supply on, and the
+    //next thing the user does is touch the wires.
+    if SafePowerDown then
+      ErrMsg := ErrMsg + '. The Bus Pirate is in HiZ with the supply off';
+  end;
 end;
 
 function TBusPirate5Hardware.I2CDeviceLine(Addr: byte): string;

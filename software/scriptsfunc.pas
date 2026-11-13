@@ -28,16 +28,26 @@ var
   i: integer;
   ScriptText: TStrings;
 begin
-  //Create the list before the guard, not after. Exiting first left the function
-  //result unassigned, which is whatever happened to be in that register, and
-  //every caller then treats it as a TStrings and frees it. Selecting a chip
-  //whose script file is missing is enough to reach it.  By Dreg
+  //Create the list before the guard: its only caller, SelectChip in
+  //findchip.pas, assigns the result to ComboBox_chip_scriptrun.Items, and a
+  //chip whose script file is missing would hand it an unassigned pointer.
+  //By Dreg
   Result:= TStringList.Create;
   if not FileExists(ScriptsPath+ScriptFile) then Exit;
 
   ScriptText:= TStringList.Create;
-
-  ScriptText.LoadFromFile(ScriptsPath+ScriptFile);
+  try
+  //A file that is there but cannot be read gives no sections and a log line.
+  //By Dreg
+  try
+    ScriptText.LoadFromFile(ScriptsPath+ScriptFile);
+  except
+    on E: Exception do
+    begin
+      LogPrint(E.Message);
+      Exit;
+    end;
+  end;
 
   for i:= 0 to ScriptText.Count-1 do
   begin
@@ -50,6 +60,9 @@ begin
         Result.Add(SectionName);
       end;
     end;
+  end;
+  finally
+    ScriptText.Free;  //By Dreg
   end;
 
 end;

@@ -12,7 +12,7 @@ uses
   Classes, SysUtils, LazFileUtils, Forms, Controls, Graphics, Dialogs, StdCtrls,
   ExtCtrls, ComCtrls, Menus, ActnList, Buttons, StrUtils, spi25,
   spi45, spi95, i2c, microwire, spimulti, ft232hhw,
-  XMLRead, XMLWrite, DOM, msgstr, dregstr, Translations, LCLProc, LCLType, LCLTranslator,
+  XMLRead, XMLWrite, DOM, msgstr, dregstr, dregi18n, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8,
   pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw,
@@ -102,6 +102,7 @@ type
     MenuBP5COMPort: TMenuItem;
     MenuBP5Power: TMenuItem;
     MenuBP5Voltage: TMenuItem;
+    MenuBP5V1V2: TMenuItem;
     MenuBP5V1V8: TMenuItem;
     MenuBP5V2V5: TMenuItem;
     MenuBP5V3V3: TMenuItem;
@@ -131,6 +132,7 @@ type
     MenuBP5I2C400K: TMenuItem;
     MenuBP5I2C1M: TMenuItem;
     MenuBP5I2CScan: TMenuItem;
+    MenuBP5Labels: TMenuItem;
     MenuBP5Disconnect: TMenuItem;
     MenuBP5Info: TMenuItem;
     MenuBP5Help: TMenuItem;
@@ -254,6 +256,7 @@ type
     procedure MenuHWBUSPIRATE5Click(Sender: TObject);
     procedure MenuBP5DisconnectClick(Sender: TObject);
     procedure MenuBP5I2CScanClick(Sender: TObject);
+    procedure MenuBP5LabelsClick(Sender: TObject);
     procedure MenuBP5InfoClick(Sender: TObject);
     procedure MenuBP5HelpClick(Sender: TObject);
     procedure MenuHWAVRISPClick(Sender: TObject);
@@ -291,10 +294,16 @@ type
     procedure VerifyFlash(BlankCheck: boolean = false);
   private
     { private declarations }
-    //Last state the COM port submenu was built from, so the polling timer only
-    //touches the menu when something actually changed.
+    //The state each COM port submenu was last built from, so the polling timer
+    //only rebuilds a menu when that state changes.
     FCOMPortMenuSig: string;
     FBP5PortMenuSig: string;
+    //Set by ButtonEraseClick for the combined erase and program command: true
+    //after an erase that ended well, and after an I2C erase where the chip
+    //refused some pages but not all.  By Dreg
+    FEraseOK: boolean;
+    //True once FormCloseQuery has written settings.xml.  By Dreg
+    FSettingsSaved: boolean;
     procedure BuzzpiratCOMPortItemClick(Sender: TObject);
     procedure BP5COMPortItemClick(Sender: TObject);
     //Shared by the report windows built at run time.
@@ -304,13 +313,14 @@ type
     { public declarations }
     //Rebuilds the Buzzpirat COM port submenu from the ports the system reports.
     procedure RefreshCOMPortMenu;
-    //Same, for the Bus Pirate v5+ - but built from the USB registry, so it can
-    //name the device and pick its BPIO2 interface rather than the terminal one.
+    //Same, for the Bus Pirate v5+: every serial port, with the ones found in
+    //the USB registry labelled as the BPIO2 or the terminal interface.
     procedure RefreshBP5PortMenu;
     //Renders one I2C scan result and lets the user adopt an address. Shared by
-    //both Bus Pirate back ends, so the caller supplies the descriptions.
+    //both Bus Pirate back ends, so the caller supplies the descriptions and the
+    //hints shown when nothing answers, which name that back end's pins.
     procedure ShowI2CScanResult(const Found: TBytes; const APort, ABusDesc: string;
-                                ALines: TStrings);
+                                ALines: TStrings; const AEmptyHints: string);
     //Copies a 7-bit I2C address into the A0..A2 / device type toggles.
     procedure ApplyI2CAddress(Addr: byte);
 
@@ -318,7 +328,8 @@ type
 
   procedure LogPrint(text: string);
   function PageSizeFromUI: word;
-  procedure SaveOptions(XMLfile: TXMLDocument);
+  //'' once settings.xml is written, else why it could not be.  By Dreg
+  function SaveOptions(XMLfile: TXMLDocument): string;
   Procedure LoadOptions(XMLfile: TXMLDocument);
   procedure LoadXML;
   procedure Translate(XMLfile: TXMLDocument);
@@ -329,16 +340,19 @@ type
   function WaitChipReady: boolean;
   function MenuCheckedTag(Parent: TMenuItem; Default: PtrInt): PtrInt;
   procedure MenuCheckByTag(Parent: TMenuItem; Value: PtrInt);
+  //chiplist.xml, settings.xml, scripts and lang as full paths, all in AppDir.
+  //By Dreg
+  function AppDir: string;
+  function ChipListFileName: string;
+  function SettingsFileName: string;
+  function ScriptsPath: string;
+  function LangPath: string;
 
 const
   SPI_CMD_25             = 0;
   SPI_CMD_45             = 1;
   SPI_CMD_KB             = 2;
   SPI_CMD_95             = 3;
-
-  ChipListFileName       = 'chiplist.xml';
-  SettingsFileName       = 'settings.xml';
-  ScriptsPath            = 'scripts'+DirectorySeparator;
 
 type
 
@@ -364,9 +378,6 @@ var
 
   AsProgrammer: TAsProgrammer;
 
-  Buzzpirat_ClocKhz: integer = 0;
-  Buzzpirat_Pulls: integer = 0;
-  Buzzpirat_Power: integer = 0;
   Arduino_COMPort: string;
   Arduino_BaudRate: integer = 921600;
   Buzzpirat_COMPort: string;
@@ -383,12 +394,34 @@ var
 //Shows text in a resizable window with a fixed pitch font, for reports whose
 //columns have to line up.
 procedure ShowMonospaceReport(const ATitle, AText: string);
+//Lock and unlock the interface around an operation. Public so that the status
+//register editor and the script editor can lock the main window while they
+//talk to the device.  By Dreg
+procedure LockControl;
+procedure UnlockControl;
 implementation
 
 
 var
   TimeCounter: TDateTime;
   CurrentLang: string = 'en';
+
+const
+  //What to check when an I2C scan finds nothing. The pins and the supply differ
+  //between a Bus Pirate v3 and a v5 or newer, so each scan passes its own list.
+  //By Dreg
+  I2C_EMPTY_HINTS_V3 =
+    '  - SDA on MOSI, SCL on CLK, and a ground shared with the target' + LineEnding +
+    '  - pull-ups: switch "Pull UPs ON" on, and remember the Bus Pirate' + LineEnding +
+    '    needs its Vpullup pin fed (tie it to 3V3 or 5V)' + LineEnding +
+    '  - target power: "Power ON" drives the 3V3 and 5V rails' + LineEnding +
+    '  - a slower clock (50 kHz or 5 kHz) for long or unterminated wires';
+  I2C_EMPTY_HINTS_V5 =
+    '  - SDA on IO0, SCL on IO1, and a ground shared with the target' + LineEnding +
+    '  - pull-ups: switch "Pull UPs ON" on if the board has none. They take' + LineEnding +
+    '    their voltage from VOUT, so the supply has to be on' + LineEnding +
+    '  - target power: "Power ON" and "Voltage" set the supply on VOUT' + LineEnding +
+    '  - a slower clock (50 kHz) for long or unterminated wires';
 
 {$R *.lfm}
 
@@ -413,6 +446,54 @@ begin
   if IsNumber(MainForm.ComboChipSize.Text) then
     CurrentICParam.Size := StrToInt(MainForm.ComboChipSize.Text) else
       CurrentICParam.Size := 0;
+end;
+
+var
+  FAppDir: string = '';
+
+//The folder of chiplist.xml, settings.xml, lang and scripts, fixed at the
+//first call: the program's own, so that a start from another folder still
+//finds them. Without lang the menus show the Russian of the forms. When
+//neither chiplist.xml nor lang is next to the program but one of them is in
+//the current directory, the current directory.  By Dreg
+function AppDir: string;
+
+  function HasFiles(const Dir: string): boolean;
+  begin
+    result := FileExistsUTF8(Dir + 'chiplist.xml') or DirectoryExistsUTF8(Dir + 'lang');
+  end;
+
+var
+  cwd: string;
+begin
+  if FAppDir = '' then
+  begin
+    FAppDir := ExtractFilePath(ParamStrUTF8(0));
+    cwd := IncludeTrailingPathDelimiter(GetCurrentDirUTF8);
+    if (not HasFiles(FAppDir)) and HasFiles(cwd) then
+      FAppDir := cwd;
+  end;
+  result := FAppDir;
+end;
+
+function ChipListFileName: string;
+begin
+  result := AppDir + 'chiplist.xml';
+end;
+
+function SettingsFileName: string;
+begin
+  result := AppDir + 'settings.xml';
+end;
+
+function ScriptsPath: string;
+begin
+  result := AppDir + 'scripts' + DirectorySeparator;
+end;
+
+function LangPath: string;
+begin
+  result := AppDir + 'lang' + DirectorySeparator;
 end;
 
 function UserCancel(): boolean;
@@ -454,10 +535,9 @@ begin
       on E: EXMLReadError do
       begin
         ShowMessage(E.Message);
-        //Start a fresh document rather than leaving it nil. A file that will
-        //not parse used to mean every later save silently did nothing, so the
-        //session's settings were lost and the broken file stayed broken.
-        //By Dreg
+        //Start a fresh document rather than leaving it nil: with nil the save
+        //when the program closes does nothing, so the session's settings would
+        //be lost and the broken file would stay broken.  By Dreg
         SettingsFile := TXMLDocument.Create;
         SettingsFile.AppendChild(SettingsFile.CreateElement('settings'));
       end;
@@ -472,18 +552,86 @@ begin
 
 end;
 
-procedure TMainForm.ChangeLang(Sender: TObject);
+//The skip menu names the byte an erased page holds: 00 for the KB family, FF
+//for everything else. STR_DM_SKIP_TOKEN has a placeholder for it, so a
+//translation can put the byte anywhere in its caption.  By Dreg
+procedure UpdateSkipFFCaption;
 begin
-  CurrentLang := TMenuItem(Sender).Hint;
+  if MainForm.ComboSPICMD.ItemIndex = SPI_CMD_KB then
+    MainForm.MenuSkipFF.Caption := Format(STR_DM_SKIP_TOKEN, ['00'])
+  else
+    MainForm.MenuSkipFF.Caption := Format(STR_DM_SKIP_TOKEN, ['FF']);
+end;
 
-  Translations.TranslateResourceStrings(GetCurrentDir + '/lang/' + CurrentLang + '.po');
+//Lang with English under it (dregi18n): translates the resourcestrings and
+//returns the translator for the forms, nil when no language file is there. A
+//missing file is no error: TPOFile.Create raises on one, so LangPOFile only
+//opens what is there, and a lang directory that did not ship leaves the
+//program untranslated rather than down at startup.  By Dreg
+function LoadLanguage(const Dir, Lang: string): TPOTranslator;
+var
+  forms, strings: TPOFile;
+begin
+  result := nil;
+  forms := LangPOFile(Dir, Lang, true);
+  if forms = nil then Exit;
+  strings := LangPOFile(Dir, Lang, false);
+  try
+    if strings <> nil then
+      Translations.TranslateResourceStrings(strings);
+  finally
+    strings.Free;
+  end;
+  result := TPOTranslator.Create(forms);   //it frees forms
+end;
+
+procedure TMainForm.ChangeLang(Sender: TObject);
+var
+  translator: TPOTranslator;
+  chipSize, pageSize, mwBits: string;
+  i: integer;
+begin
+  translator := LoadLanguage(LangPath, TMenuItem(Sender).Hint);
+  if translator = nil then
+  begin
+    //The click moved the radio mark: put it back on the language in use, which
+    //is also the one the settings keep.  By Dreg
+    for i := 0 to LangMenuItem.Count - 1 do
+      LangMenuItem.Items[i].Checked := LangMenuItem.Items[i].Hint = CurrentLang;
+    Exit;
+  end;
+  CurrentLang := TMenuItem(Sender).Hint;
   LRSTranslator.Free;
-  LRSTranslator:= TPOTranslator.Create(GetCurrentDir + '/lang/' + CurrentLang + '.po');
+  LRSTranslator := translator;
+
+  //Once a chip is picked these hold its size, page size and Microwire address
+  //length, and a language file with an entry for their Text would put its
+  //placeholder over the value.  By Dreg
+  chipSize := ComboChipSize.Text;
+  pageSize := ComboPageSize.Text;
+  mwBits := ComboMWBitLen.Text;
   TPOTranslator(LRSTranslator).UpdateTranslation(MainForm);
   TPOTranslator(LRSTranslator).UpdateTranslation(ScriptEditForm);
   TPOTranslator(LRSTranslator).UpdateTranslation(ChipSearchForm);
   TPOTranslator(LRSTranslator).UpdateTranslation(sregeditForm);
   TPOTranslator(LRSTranslator).UpdateTranslation(SearchForm);
+  if IsNumber(chipSize) then
+    ComboChipSize.Text := chipSize;
+  if IsNumber(pageSize) or SameText(pageSize, 'SSTB') or SameText(pageSize, 'SSTW') then
+    ComboPageSize.Text := pageSize;
+  if IsNumber(mwBits) then
+    ComboMWBitLen.Text := mwBits;
+
+  //UpdateTranslation writes the static caption back on every component, also
+  //on those whose caption the program builds at run time. Build those again:
+  //the skip menu, the Arduino port, and both Bus Pirate port menus, whose timer
+  //only repaints them when the port list changes.  By Dreg
+  UpdateSkipFFCaption;
+  MenuArduinoCOMPort.Caption := 'Arduino COMPort: ' + Arduino_COMPort;
+  FCOMPortMenuSig := '';
+  FBP5PortMenuSig := '';
+  RefreshCOMPortMenu;
+  RefreshBP5PortMenu;
 end;
 
 procedure LoadLangList();
@@ -494,7 +642,7 @@ var
   SearchRec : TSearchRec;
   MenuItem: TMenuItem;
 begin
-  LangDir := GetCurrentDir + '/lang/';
+  LangDir := LangPath;
 
   If FindFirstUTF8(LangDir+'*.po', faAnyFile, SearchRec) = 0 then
   begin
@@ -522,9 +670,10 @@ procedure Translate(XMLfile: TXMLDocument);
 var
    PODirectory: String;
    Node: TDOMNode;
+   translator: TPOTranslator;
 begin
 
-  PODirectory:= GetCurrentDir + '/lang/';
+  PODirectory:= LangPath;
   CurrentLang:='';
 
   if XMLfile <> nil then
@@ -543,27 +692,11 @@ begin
   end;
 
   if CurrentLang = '' then
-  begin
     CurrentLang := 'en';
-    //Guarded like the branch below it. TPOTranslator.Create raises when the
-    //file is not there, and this is the default path, so a lang directory that
-    //did not ship, or an installation run from a different working directory,
-    //took the program down at startup rather than simply going untranslated.
-    //By Dreg
-    if FileExistsUTF8(PODirectory + CurrentLang + '.po') then
-    begin
-      LRSTranslator:= TPOTranslator.Create(PODirectory + CurrentLang + '.po');
-      Translations.TranslateResourceStrings(PODirectory + CurrentLang + '.po');
-    end;
-    Exit;
-  end;
 
-  if FileExistsUTF8(PODirectory + CurrentLang + '.po') then
-  begin
-    LRSTranslator:= TPOTranslator.Create(PODirectory + CurrentLang + '.po');
-    Translations.TranslateResourceStrings(PODirectory + CurrentLang + '.po');
-  end;
-
+  translator := LoadLanguage(PODirectory, CurrentLang);
+  if translator <> nil then
+    LRSTranslator := translator;
 end;               
 
 procedure LogPrint(text: string);
@@ -572,9 +705,9 @@ begin
 end;
 
 //The page size box is an editable combo, so the number in it is whatever the
-//user typed. Every flash routine that takes it indexes a 2048 byte stack array
-//with it, and only the two I2C read paths ever checked. Clamp it here, once,
-//and say so rather than quietly using a different size than the box shows.
+//user typed. It sizes the transfers into the 2048 byte DataChunk arrays on the
+//stack, and no routine checks it against them. Clamp it here, once: the box
+//then shows the size used, and a cut to 2048 is logged.
 //By Dreg
 function PageSizeFromUI: word;
 const
@@ -598,12 +731,28 @@ begin
   result := word(n);
 end;
 
+//The Start address box as a number, -1 when it holds none. Hex2Dec reads it
+//through a Longint: from 80000000 up it returns a negative number, which
+//passes every size check that subtracts it, and FF000000 sends four byte
+//addresses to a 16 MB chip. The text is read as the operations read it, with
+//no Trim: a pasted " 100" passing here would raise in Hex2Dec after the chip
+//was opened.  By Dreg
+function StartAddressFromUI: int64;
+begin
+  try
+    result := Hex2Dec64('$' + MainForm.StartAddressEdit.Text);
+  except
+    on EConvertError do result := -1;
+  end;
+end;
+
 
 function OpenDevice: boolean;
 begin
   if not AsProgrammer.Programmer.DevOpen then
   begin
-    LogPrint(AsProgrammer.Programmer.GetLastError);
+    if not AsProgrammer.Programmer.ErrorWasLogged then
+      LogPrint(AsProgrammer.Programmer.GetLastError);
     result := false;
     Exit;
   end;
@@ -613,22 +762,59 @@ begin
 end;
 
 
+//The SR1 bits that are block protection on the part that answers 9Fh. Several
+//of bits 2 to 7 protect nothing: SRP0 or SRWD (bit 7), Macronix QE (bit 6),
+//TB and SEC on Winbond and GigaDevice parts below 256 Mbit (bits 5 and 6),
+//Micron TB (bit 5), and on the Atmel AT25DF family the WP pin level (bit 4,
+//1 while WP is high) and EPE (bit 5). The layouts follow flashrom's chip
+//database, except bits 5 and 6 of the GigaDevice parts it decodes as BP4_SRWD
+//(GD25Q16C datasheet). SR2 is not read: a Winbond or GigaDevice part with CMP
+//set and its BP bits clear is fully protected, and that is not caught.  By Dreg
+function SR1ProtectMask: byte;
+var
+  op: byte;
+  id: array[0..2] of byte = ($FF, $FF, $FF);
+begin
+  op := $9F;
+  spi25.SPIWrite(0, 1, op);
+  spi25.SPIRead(1, 3, id);
+  result := $3C;                //BP0 to BP3: Macronix, ISSI, SST and the rest
+  case id[0] of
+    $1F:
+      //AT25DF, AT26DF, AT25DL, AT25DQ, AT25F512B (flashrom), AT25DF256 and
+      //AT25DF512C (datasheets): SWP or BP0, bit 4 the WP pin level
+      if ((id[1] in [$40, $42..$48]) and (id[2] <= $03)) or
+         ((id[1] = $65) and (id[2] <= $01)) or
+         ((id[1] = $86) and (id[2] = $00)) then
+        result := $0C
+      else if id[1] in [$42..$48] then
+        result := $1C           //AT25SL, AT25FF: TB is bit 5, SEC bit 6
+      else
+        result := $7C;          //AT25FS, AT25SF, AT25EU: BP4 is bit 6
+    $85, $0B:                   //Puya, XTX: BP4 is bit 6
+      result := $7C;
+    $EF, $C8:                   //Winbond, GigaDevice: BP3 (bit 5) from 256 Mbit
+      if id[2] < $19 then
+        result := $1C;
+    $20:                        //Micron N25Q and MT25Q: TB is bit 5, BP3 bit 6
+      if id[1] in [$BA, $BB] then
+        result := $5C;
+    $2C:                        //Micron MT35X
+      result := $5C;
+  end;
+end;
+
 function IsLockBitsEnabled: boolean;
 var
-  sreg: byte;
+  sreg, mask: byte;
 begin
   result := false;
   sreg := 0;
   if MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
+    mask := SR1ProtectMask;
     UsbAsp25_ReadSR(sreg);
-    if IsBitSet(sreg, 2) or
-       IsBitSet(sreg, 3) or
-       IsBitSet(sreg, 4) or
-       IsBitSet(sreg, 5) or
-       IsBitSet(sreg, 6) or
-       IsBitSet(sreg, 7)
-    then
+    if (sreg and mask) <> 0 then
     begin
       LogPrint(STR_BLOCK_EN);
       Result := true;
@@ -652,8 +838,8 @@ function SetSPISpeed(OverrideSpeed: byte): integer;
 var
   Speed: byte;
 begin
-  //Not every programmer has a speed menu (Buzzpirat takes its clock from its
-  //own submenu instead), so start from a defined value.
+  //Not every programmer has a speed menu that this function reads, so start
+  //from a defined value.
   Speed := 0;
   if AsProgrammer.Current_HW = CHW_ARDUINO then
   begin
@@ -666,8 +852,7 @@ begin
   //Neither Bus Pirate back end takes its clock from here. Both read their own
   //menu inside the driver, because the number this function returns is an index
   //into a table that is specific to the programmer, and theirs are not the same
-  //table. There used to be a CHW_BUZZPIRAT branch here that read the Arduino
-  //menu items; it was copy-paste and its result was discarded.  By Dreg
+  //table.  By Dreg
 
   if AsProgrammer.Current_HW = CHW_AVRISP then
   begin
@@ -704,7 +889,10 @@ begin
     if MainForm.MenuFT232SPI6Mhz.Checked then Speed := MainForm.MenuFT232SPI6Mhz.Tag;
   end;
 
-  if (MainForm.RadioSPI.Checked) and (AsProgrammer.Current_HW = CHW_CH347) then
+  //Whatever the radio says: a chip script can enter SPI with I2C or Microwire
+  //selected, the CH347's Microwire ignores the clock, and a Speed left at 0
+  //picks its fastest clock, 60 MHz.  By Dreg
+  if AsProgrammer.Current_HW = CHW_CH347 then
   begin
     if MainForm.MenuCH347SPIClock60MHz.Checked then Speed := MainForm.MenuCH347SPIClock60MHz.Tag;
     if MainForm.MenuCH347SPIClock30MHz.Checked then Speed := MainForm.MenuCH347SPIClock30MHz.Tag;
@@ -833,6 +1021,21 @@ begin
   MainForm.ProgressBar.Position := 0;
 end;
 
+//EN4B, checked. On a failure the caller stops before its loop: the loop sends
+//four byte addresses, which a chip in three byte mode takes wrongly, address 0
+//included. EN4B sends WREN and B7h, then on a Spansion or ISSI part (the 9Fh
+//ID) a bank register write, so an earlier one may have gone through: EX4B
+//goes out too.  By Dreg
+function EnterFourByteMode: boolean;
+begin
+  result := UsbAsp25_EN4B() >= 1;
+  if not result then
+  begin
+    UsbAsp25_EX4B();
+    LogPrint(STR_DM_EN4B_FAILED);
+  end;
+end;
+
 procedure WriteFlash25(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word; WriteType: integer);
 const
   FLASH_SIZE_128MBIT = 16777216;
@@ -843,6 +1046,8 @@ var
   PageSizeTemp: word;
   i, Got: integer;
   SkipPage: boolean = false;
+  InAAI: boolean = false;
+  waitUntil: QWord;
 begin
   if (WriteSize = 0) then
   begin
@@ -859,30 +1064,27 @@ begin
   Address := StartAddress;
   MainForm.ProgressBar.Max := WriteSize div PageSize;
 
-  //What decides is the highest address this pass touches, not how many bytes
-  //it moves: three byte addressing cannot express anything at or above 16 MB.
-  //Sizing it from WriteSize means a small buffer written high up a 32 MB chip
-  //silently wraps to a low address - and a Verify with the same bug wraps to
-  //the same place and confirms it.
-  if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+  //Four byte mode depends on the highest address this pass touches, not on how
+  //many bytes it moves: three byte addressing cannot express anything at or
+  //above 16 MB. With the mode picked from WriteSize, a small buffer written
+  //high up a 32 MB chip would wrap to a low address, and a Verify that picks
+  //it the same way would read it back from there and pass.
+  if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then
+    if not EnterFourByteMode then Exit;
 try
   while (Address-StartAddress) < WriteSize do
   begin
     //Только вначале aai
-    if (((WriteType = WT_SSTB) or (WriteType = WT_SSTW)) and (Address = StartAddress)) or
+    if ((WriteType = WT_SSTB) and (Address = StartAddress)) or
     //Вначале страницы
     (WriteType = WT_PAGE) then UsbAsp25_WREN();
 
-    //Determines first page buffer size to prevent buffer "rolls over" on address boundary.
     //The first chunk stops at the next page boundary; every chunk after it is a
-    //whole page. The old formula used the chip size instead of the offset into
-    //the page and returned 0 for any page aligned start address, which left the
-    //loop writing nothing and never advancing Address.
-    if (Address = StartAddress) and (PageSizeTemp > 2) then
-    begin
-      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp);
-      if PageSize = 0 then PageSize := PageSizeTemp;
-    end
+    //whole page. For SSTW that makes an odd start a chunk of one byte, and a
+    //page size of 2 typed by hand (no chip in the list has one) aligns the same
+    //way, so none of its chunks crosses a page boundary.
+    if (Address = StartAddress) and (PageSizeTemp >= 2) then
+      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp)
     else
       PageSize := PageSizeTemp;
 
@@ -896,10 +1098,31 @@ try
         //Пишем остальные(без адреса)
         BytesWrite := BytesWrite + UsbAsp25_WriteSSTB($AF, datachunk[0]);
 
+    //AAI Word Program writes whole words: the chip puts the first byte at
+    //[A23-A1] with A0 = 0 and the second with A0 = 1, whatever A0 was sent
+    //(SST25VF080B datasheet DS20005045D, 4.4.4). So a byte with no partner in
+    //its word, at an odd start or as a last byte at an even address, goes in
+    //with Byte Program (02h): outside AAI, so after a WRDI if AAI is running,
+    //and with its own WREN. Sent as a word, it would land one byte lower or
+    //write a stale second byte past the end.  By Dreg
     if (WriteType = WT_SSTW) then
-      if (Address = StartAddress) then //Пишем первые два байта с адресом
-        BytesWrite := BytesWrite + UsbAsp25_Write($AD, Address, datachunk, PageSize)
-        else
+      if PageSize = 1 then
+      begin
+        if InAAI then
+        begin
+          UsbAsp25_Wrdi();
+          InAAI := false;
+        end;
+        UsbAsp25_WREN();
+        BytesWrite := BytesWrite + UsbAsp25_Write($02, Address, datachunk, 1);
+      end
+      else if not InAAI then //Пишем первые два байта с адресом
+      begin
+        UsbAsp25_WREN();
+        BytesWrite := BytesWrite + UsbAsp25_Write($AD, Address, datachunk, 2);
+        InAAI := true;
+      end
+      else
         //Пишем остальные(без адреса)
         BytesWrite := BytesWrite + UsbAsp25_WriteSSTW($AD, datachunk[0], datachunk[1]);
 
@@ -919,7 +1142,7 @@ try
 
       if not SkipPage then
       begin
-        if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then //Память больше 128Мбит
+        if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then
         begin
           //4 байтная адресация
           BytesWrite := BytesWrite + UsbAsp25_Write32bitAddr($02, Address, datachunk, PageSize)
@@ -934,17 +1157,16 @@ try
 
     if (MainForm.MenuAutoCheck.Checked) and (WriteType = WT_PAGE) then
     begin
-      //Same rule as the write above and as EN4B/EX4B: what decides is the
-      //highest address touched. Reading back with three address bytes from a
-      //chip that was just put into four byte mode compares the wrong page and
-      //fails a write that actually worked.
+      //Same condition as EN4B above: a read-back with three address bytes from
+      //a chip in four byte mode compares the wrong page and fails a write that
+      //worked.
       if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then
         Got := UsbAsp25_Read32bitAddr($03, Address, datachunk2, PageSize)
       else
         Got := UsbAsp25_Read($03, Address, datachunk2, PageSize);
 
-      //Without this a failed read-back compares DataChunk2 from the *previous*
-      //page, which can match and let a page that was never written pass.
+      //A failed read-back leaves DataChunk2 holding the previous page, which
+      //can match and pass a page that was never written.
       if Got <> PageSize then
       begin
         LogPrint(STR_WRONG_BYTES_READ + ' @ 0x' + IntToHex(Address, 8));
@@ -968,11 +1190,19 @@ try
     if UserCancel then Break;
   end;
 finally
-  //Must match the EN4B condition exactly, and must run on the abort paths too:
-  //leaving the chip latched in four byte address mode poisons every later
-  //operation that legitimately picks three byte addressing. The mode is
-  //volatile but survives CS, DevClose and anything short of a power cycle.
-  if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
+  //Must match the EN4B condition and run on the abort paths too: a chip left
+  //in four byte address mode breaks every later operation that picks three
+  //byte addressing. The mode is volatile but survives CS, DevClose and
+  //anything short of a power cycle.
+  if (StartAddress + WriteSize) > FLASH_SIZE_128MBIT then
+  begin
+    //A cancel lands here while the last page program may still run, and a
+    //busy chip ignores EX4B. A page program takes a few ms, so wait for WIP to
+    //clear, 50 ms at most, without asking about a cancel that already came.
+    waitUntil := GetTickCount64 + 50;
+    while UsbAsp25_Busy and (GetTickCount64 < waitUntil) do ;
+    UsbAsp25_EX4B();
+  end;
   UsbAsp25_Wrdi(); //Для sst
 end;
 
@@ -1011,16 +1241,10 @@ begin
   begin
     UsbAsp95_WREN();
 
-    //Trims the first chunk so a page write does not roll over a page boundary.
-    //Same correction WriteFlash25 and WriteFlashI2C already carry: using the
-    //chip size instead of the offset into the page evaluates to zero for any
-    //page aligned non-zero start address, and a page size of zero writes
-    //nothing while the address never advances.  By Dreg
+    //Trims the first chunk so a page write does not roll over a page boundary,
+    //as WriteFlash25 and WriteFlashI2C do.  By Dreg
     if (Address = StartAddress) and (PageSizeTemp > 1) then
-    begin
-      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp);
-      if PageSize = 0 then PageSize := PageSizeTemp;
-    end
+      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp)
     else
       PageSize := PageSizeTemp;
 
@@ -1058,13 +1282,15 @@ begin
   MainForm.ProgressBar.Position := 0;
 end;
 
-procedure EraseEEPROM25(StartAddress, WriteSize: cardinal; PageSize: word; ChipSize: integer);
+//True when every byte was erased, which is when it logs Done.  By Dreg
+function EraseEEPROM25(StartAddress, WriteSize: cardinal; PageSize: word; ChipSize: integer): boolean;
 var
   DataChunk: array[0..2047] of byte;
   DataChunk2: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
   i: integer;
 begin
+  result := false;
   if (StartAddress >= WriteSize) or (WriteSize = 0) {or (PageSize > WriteSize)} then
   begin
     LogPrint(STR_CHECK_SETTINGS);
@@ -1110,24 +1336,40 @@ begin
   if BytesWrite <> WriteSize then
     LogPrint(STR_WRONG_BYTES_WRITE)
   else
+  begin
     LogPrint(STR_DONE);
+    result := true;
+  end;
 
   MainForm.ProgressBar.Position := 0;
 end;
 
-function EraseFlashKB(chipsize: longword; pagesize: word): integer;
+//False when the user cancelled or a command did not go out, which it logs.
+//By Dreg
+function EraseFlashKB(chipsize: longword; pagesize: word): boolean;
 var
   i: integer;
   busy: boolean;
+
+  function NotSent: boolean;
+  begin
+    if not AsProgrammer.Programmer.ErrorWasLogged then
+      LogPrint(STR_DM_ERASE_NOT_SENT);
+    MainForm.ProgressBar.Position := 0;
+    result := false;
+  end;
+
 begin
+  result := false;
   MainForm.ProgressBar.Max := chipsize div pagesize;
 
-  UsbAspMulti_EnableEDI();
-  UsbAspMulti_WriteReg($FEA7, $A4); //en write
+  if (UsbAspMulti_EnableEDI() < 1) or
+     (UsbAspMulti_WriteReg($FEA7, $A4) < 1) then //en write
+    Exit(NotSent);
 
   for i:= 0 to (chipsize div pagesize)-1 do
   begin
-    UsbAspMulti_ErasePage(i * pagesize);
+    if UsbAspMulti_ErasePage(i * pagesize) < 1 then Exit(NotSent);
     //busy
     repeat
       if UserCancel then Exit;
@@ -1138,6 +1380,7 @@ begin
   end;
 
   MainForm.ProgressBar.Position := 0;
+  result := true;
 end;
 
 procedure WriteFlashKB(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word);
@@ -1325,7 +1568,8 @@ begin
 
   RomStream.Clear;
 
-  if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+  if ChipSize > FLASH_SIZE_128MBIT then
+    if not EnterFourByteMode then Exit;
 try
   while Address < ChipSize do
   begin
@@ -1355,15 +1599,14 @@ try
     if UserCancel then Break;
   end;
 finally
-  //The only four byte mode loop that was not protected. An exception anywhere
-  //above used to leave the chip latched, which then breaks every later
-  //operation that legitimately picks three byte addressing, until the part is
-  //power cycled.  By Dreg
+  //As in the other four byte mode loops: an exception anywhere above would
+  //leave the chip latched, which breaks every later operation that picks three
+  //byte addressing until the part is power cycled.  By Dreg
   if ChipSize > FLASH_SIZE_128MBIT then UsbAsp25_EX4B();
 end;
 
-  //The loop covers StartAddress..ChipSize, so that - not ChipSize - is how
-  //many bytes a complete read produces.
+  //The loop covers StartAddress..ChipSize, so a complete read produces
+  //ChipSize - StartAddress bytes.
   if BytesRead <> integer(ChipSize - StartAddress) then
     LogPrint(STR_WRONG_BYTES_READ)
   else
@@ -1409,7 +1652,9 @@ begin
     if UserCancel then Break;
   end;
 
-  if BytesRead <> ChipSize then
+  //A read from a Start address stops at the end of the chip, as in
+  //ReadFlash25.  By Dreg
+  if BytesRead <> integer(ChipSize - StartAddress) then
     LogPrint(STR_WRONG_BYTES_READ)
   else
     LogPrint(STR_DONE);
@@ -1544,13 +1789,10 @@ begin
   Address := StartAddress;
   MainForm.ProgressBar.Max := DataSize div ChunkSize;
 
-  //Three byte addressing can only express addresses below 16 MB, so what
-  //decides is the highest address this pass touches - not how many bytes it
-  //moves. Verifying a small range high up a 32 MB chip needs four byte
-  //addressing just as much as verifying the whole chip does; picking it from
-  //the transfer size makes the verify wrap to a low address, where it happily
-  //re-reads whatever a write with the same bug just put there.
-  if (StartAddress + DataSize) > FLASH_SIZE_128MBIT then UsbAsp25_EN4B();
+  //As in WriteFlash25: four byte mode depends on the highest address this pass
+  //touches, not on how many bytes it moves.
+  if (StartAddress + DataSize) > FLASH_SIZE_128MBIT then
+    if not EnterFourByteMode then Exit;
 try
   while (Address-StartAddress) < DataSize do
   begin
@@ -1562,7 +1804,7 @@ try
         Got := UsbAsp25_Read($03, Address, datachunk, ChunkSize);
 
     //Comparing a stale buffer would report a mismatch at the wrong address, or
-    //no mismatch at all. Neither is an answer.
+    //none at all.
     if Got <> ChunkSize then
     begin
       LogPrint(STR_WRONG_BYTES_READ + ' @ 0x' + IntToHex(Address, 8));
@@ -1861,8 +2103,8 @@ begin
     if UserCancel then Break;
   end;
 
-  //The loop covers StartAddress..ChipSize, so that is what a complete read
-  //produces - not ChipSize.
+  //The loop covers StartAddress..ChipSize, so a complete read produces
+  //ChipSize - StartAddress bytes.
   if BytesRead <> integer(ChipSize - StartAddress) then
     LogPrint(STR_WRONG_BYTES_READ)
   else
@@ -1871,14 +2113,20 @@ begin
   MainForm.ProgressBar.Position := 0;
 end;
 
-procedure WriteFlashI2C(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte);
+//False when it stopped: a cancel, a chip that stayed busy, or nothing to
+//write. Pages that failed do not stop it.  By Dreg
+function WriteFlashI2C(var RomStream: TMemoryStream; StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte): boolean;
 var
   DataChunk: array[0..2047] of byte;
   Address, BytesWrite: cardinal;
   PageSizeTemp: word;
   BusyDeadline: QWord;
-  PageAddr: cardinal;
+  PageAddr, FirstFailed: cardinal;
+  Written, Pages, Failed: integer;
+  Stopped: boolean;
 begin
+  result := false;
+  Stopped := false;
   if {(StartAddress >= WriteSize) or} (WriteSize = 0) {or (PageSize > WriteSize)} then
   begin
     LogPrint(STR_CHECK_SETTINGS);
@@ -1888,69 +2136,107 @@ begin
   PageSizeTemp := PageSize;
   LogPrint(STR_WRITING_FLASH);
   BytesWrite := 0;
+  Pages := 0;
+  Failed := 0;
+  FirstFailed := 0;
   Address := StartAddress;
   MainForm.ProgressBar.Max := WriteSize div PageSize;
 
   while (Address-StartAddress) < WriteSize do
   begin
-    //Determines first page buffer size to prevent buffer "rolls over" on address
-    //boundary. The first chunk stops at the next page boundary; every chunk
-    //after it is a whole page. The old formula used the chip size instead of the
-    //offset into the page and returned 0 for a page aligned start address, which
-    //left the loop writing nothing and never advancing Address.
+    //The first chunk stops at the next page boundary and every chunk after it
+    //is a whole page, so no page write rolls over a page boundary.
     if (Address = StartAddress) and (PageSizeTemp > 1) then
-    begin
-      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp);
-      if PageSize = 0 then PageSize := PageSizeTemp;
-    end
+      PageSize := PageSizeTemp - (StartAddress mod PageSizeTemp)
     else
       PageSize := PageSizeTemp;
 
     if (WriteSize - (Address-StartAddress)) < PageSize then PageSize := (WriteSize - (Address-StartAddress));
 
     RomStream.ReadBuffer(DataChunk, PageSize);
-    BytesWrite := BytesWrite + UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
     //Keep the address of the page being written: Address moves on before the
-    //wait below, so reporting it there named the page after the one that failed.
-    //By Dreg
+    //wait below, whose timeout names this page.  By Dreg
     PageAddr := Address;
+    Written := UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
+    Inc(Pages);
+    //A programmer returns the page size for a page it sent and a negative
+    //number for a transfer that failed. Only the two Bus Pirate back ends are
+    //known to fail a page whose data the chip refused: FT232H, USBasp,
+    //AVRISP-MKII and Arduino never look at that acknowledge, and CH341 and
+    //CH347 fail only when their DLL call fails. A failed page is counted and
+    //the write goes on: a chip can protect only part of itself (an SPD EEPROM
+    //can protect 00h-7Fh and still take 80h-FFh).  By Dreg
+    if Written < PageSize then
+    begin
+      if Failed = 0 then FirstFailed := PageAddr;
+      Inc(Failed);
+    end
+    else
+      BytesWrite := BytesWrite + cardinal(Written);
     Inc(Address, PageSize);
 
     //Acknowledge polling: the chip stops answering while it programs a page.
     //A transport failure looks exactly like a busy chip from here, so the wait
-    //is bounded - an EEPROM page write is milliseconds, and without the bound a
+    //is bounded: an EEPROM page write is milliseconds, and without the bound a
     //broken link spins in this loop until the user notices and cancels.
     BusyDeadline := GetTickCount64 + 5000;
     while UsbAspI2C_BUSY(DevAddr) do
     begin
       Application.ProcessMessages;
-      if UserCancel then Exit;
+      if UserCancel then
+      begin
+        Stopped := true;
+        Break;
+      end;
       if GetTickCount64 > BusyDeadline then
       begin
         LogPrint(STR_I2C_NO_ANSWER + ' @ 0x' + IntToHex(PageAddr, 8));
-        Exit;
+        Stopped := true;
+        Break;
       end;
-    end; 
+    end;
+    if Stopped then Break;
 
     MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
     Application.ProcessMessages;
-    if UserCancel then Break;
+    if UserCancel then
+    begin
+      Stopped := true;
+      Break;
+    end;
   end;
 
-  if BytesWrite <> WriteSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
-  else
-    LogPrint(STR_DONE);
+  //A stop has logged its reason. The pages that failed before it still get
+  //their line, and no byte count is compared.  By Dreg
+  if Failed > 0 then
+    LogPrint(Format(STR_DM_I2C_PAGES_FAILED, [Failed, Pages, IntToHex(FirstFailed, 8)]))
+  else if not Stopped then
+  begin
+    if BytesWrite <> WriteSize then
+      LogPrint(STR_WRONG_BYTES_WRITE)
+    else
+      LogPrint(STR_DONE);
+  end;
 
   MainForm.ProgressBar.Position := 0;
+  result := not Stopped;
 end;
 
-procedure EraseFlashI2C(StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte);
+//True when every page was erased, which is when it logs Done. PartlyRefused
+//when it ran to the end and the chip refused some pages but not all, as an SPD
+//EEPROM that protects 00h-7Fh does.  By Dreg
+function EraseFlashI2C(StartAddress, WriteSize: cardinal; PageSize: word; DevAddr: byte;
+  out PartlyRefused: boolean): boolean;
 var
   DataChunk: array[0..2047] of byte;
-  Address, BytesWrite, PageAddr: cardinal;
+  Address, BytesWrite, PageAddr, FirstFailed: cardinal;
   BusyDeadline: QWord;
+  Written, Pages, Failed: integer;
+  Stopped: boolean;
 begin
+  result := false;
+  PartlyRefused := false;
+  Stopped := false;
   if (StartAddress >= WriteSize) or (WriteSize = 0) then
   begin
     LogPrint(STR_CHECK_SETTINGS);
@@ -1959,6 +2245,9 @@ begin
 
   LogPrint(STR_ERASING_FLASH);
   BytesWrite := 0;
+  Pages := 0;
+  Failed := 0;
+  FirstFailed := 0;
   Address := StartAddress;
   MainForm.ProgressBar.Max := WriteSize div PageSize;
 
@@ -1966,33 +2255,62 @@ begin
   begin
     if (WriteSize - Address) < PageSize then PageSize := (WriteSize - Address);
     FillByte(DataChunk, PageSize, $FF);
-    BytesWrite := BytesWrite + UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
+    PageAddr := Address;
+    Written := UsbAspI2C_Write(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, PageSize);
+    Inc(Pages);
+    //Counted as in the write loop: a failed page does not stop the erase.
+    if Written < PageSize then
+    begin
+      if Failed = 0 then FirstFailed := PageAddr;
+      Inc(Failed);
+    end
+    else
+      BytesWrite := BytesWrite + cardinal(Written);
     Inc(Address, PageSize);
 
-    //Bounded for the same reason the write loop is: a link that has died looks
-    //exactly like a chip that is still programming, and an unbounded wait here
-    //spins at full speed logging an error per call until the user gives up.
+    //Bounded as in the write loop: a link that has died looks exactly like a
+    //chip that is still programming.
     BusyDeadline := GetTickCount64 + 5000;
     while UsbAspI2C_BUSY(DevAddr) do
     begin
       Application.ProcessMessages;
-      if UserCancel then Exit;
+      if UserCancel then
+      begin
+        Stopped := true;
+        Break;
+      end;
       if GetTickCount64 > BusyDeadline then
       begin
         LogPrint(STR_I2C_NO_ANSWER + ' @ 0x' + IntToHex(PageAddr, 8));
-        Exit;
+        Stopped := true;
+        Break;
       end;
-    end; 
+    end;
+    if Stopped then Break;
 
     MainForm.ProgressBar.Position := MainForm.ProgressBar.Position + 1;
     Application.ProcessMessages;
-    if UserCancel then Break;
+    if UserCancel then
+    begin
+      Stopped := true;
+      Break;
+    end;
   end;
 
-  if BytesWrite <> WriteSize then
-    LogPrint(STR_WRONG_BYTES_WRITE)
-  else
-    LogPrint(STR_DONE);
+  //As in the write loop.  By Dreg
+  if Failed > 0 then
+    LogPrint(Format(STR_DM_I2C_PAGES_FAILED, [Failed, Pages, IntToHex(FirstFailed, 8)]))
+  else if not Stopped then
+  begin
+    if BytesWrite <> WriteSize then
+      LogPrint(STR_WRONG_BYTES_WRITE)
+    else
+    begin
+      LogPrint(STR_DONE);
+      result := true;
+    end;
+  end;
+  PartlyRefused := (Failed > 0) and (Failed < Pages) and not Stopped;
 
   MainForm.ProgressBar.Position := 0;
 end;
@@ -2011,10 +2329,10 @@ begin
   end;
 
   //The caller passes 65535 unless the user asked for byte at a time reads, so
-  //without a limit from the programmer itself this always asks for the whole
-  //2048 byte buffer. A Bus Pirate v5 or newer refuses any read over 512 and the
-  //verify then fails on its first chunk, on every chip. VerifyFlash25 has taken
-  //its chunk from the back end all along; this one never did.  By Dreg
+  //without a limit from the programmer itself this asks for up to the whole
+  //2048 byte buffer. A Bus Pirate v5 or newer reads at most 512 bytes per
+  //request, and its back end splits anything larger into several, so its own
+  //limit is the chunk that costs one round trip, as in VerifyFlash25.  By Dreg
   if (ASProgrammer.Current_HW = CHW_BUSPIRATE5) and (BusPirate5Dev <> nil) then
     if ChunkSize > BusPirate5Dev.MaxRead then ChunkSize := BusPirate5Dev.MaxRead;
 
@@ -2033,8 +2351,8 @@ begin
 
     Got := UsbAspI2C_Read(DevAddr, MainForm.ComboAddrType.ItemIndex, Address, datachunk, ChunkSize);
 
-    //Comparing a stale buffer would report a mismatch at the wrong address, or
-    //none at all. Neither is an answer.
+    //After a short read DataChunk is stale: comparing it would report a
+    //mismatch at the wrong address, or none at all.
     if Got <> ChunkSize then
     begin
       LogPrint(STR_WRONG_BYTES_READ + ' @ 0x' + IntToHex(Address, 8));
@@ -2070,19 +2388,20 @@ end;
 
 procedure SelectHW(programmer: THardwareList);
 begin
-  //Release the back end being left, but only when the selection really changes:
-  //this is also called while the saved settings are applied at startup. Both
-  //Bus Pirate drivers hold their own serial handle, and on a v5 or newer the
-  //two menus can point at ports of the same physical device, so leaving the
-  //outgoing one open makes the incoming one fail with an access denied that
-  //reads like a driver fault. Disconnecting also parks the pins and drops the
-  //target supply, which is what should happen when the user changes
-  //programmer.  By Dreg
+  //Release every Bus Pirate back end but the incoming one, and only when the
+  //selection really changes: this is also called while the saved settings are
+  //applied at startup. Each driver holds its own serial handle, the I2C scan
+  //and Device info of both menus, and Show pin labels, open one whatever
+  //programmer is selected, and on a v5 or newer the two menus can point at
+  //ports of the same physical device, so a session left open makes the other
+  //driver fail with an access denied that reads like a driver fault.
+  //Disconnecting also parks the pins and drops the target supply, which is
+  //what should happen when the user changes programmer.  By Dreg
   if programmer <> AsProgrammer.Current_HW then
   begin
-    if (AsProgrammer.Current_HW = CHW_BUZZPIRAT) and (BuzzpiratDev <> nil) then
+    if (programmer <> CHW_BUZZPIRAT) and (BuzzpiratDev <> nil) then
       BuzzpiratDev.Disconnect;
-    if (AsProgrammer.Current_HW = CHW_BUSPIRATE5) and (BusPirate5Dev <> nil) then
+    if (programmer <> CHW_BUSPIRATE5) and (BusPirate5Dev <> nil) then
       BusPirate5Dev.Disconnect;
   end;
 
@@ -2204,16 +2523,22 @@ begin
     end;
 end;
 
-//Waits for the chip to finish an erase or a page program. False means the
-//operation has to stop: either the user cancelled, which UserCancel has already
-//logged, or the chip stopped answering, which nothing else would report.
+//Waits for the chip to finish an erase, a page program or a status register
+//write. False means the operation has to stop: the user cancelled, which
+//UserCancel has already logged, or the chip stopped answering, logged here.
 function WaitChipReady: boolean;
 var
   linkLost: boolean;
 begin
   result := UsbAsp25_WaitReady(linkLost);
   if linkLost then
+  begin
     LogPrint('The chip stopped answering while waiting for it to finish - aborted');
+    //As UserCancel does: every caller leaves on false, and a chip erase runs
+    //the bar in marquee mode.  By Dreg
+    MainForm.ProgressBar.Style := pbstNormal;
+    MainForm.ProgressBar.Position := 0;
+  end;
 end;
 
 //Everything that can reach the device or the buffer. The flash loops pump the
@@ -2231,25 +2556,35 @@ begin
   MainForm.MenuHexEditor.Enabled := OnOff;
   MainForm.ScriptsMenuItem.Enabled := OnOff;
 
-  //The bus radios live next to the toolbar, not on it, so LockControl never
-  //covered them. Their change handlers reset the chip size, the page size and
-  //the address type, which the running transfer is still reading.  By Dreg
+  //Also the bus radios: their change handlers reset the chip size, the page
+  //size and the address type, which the running transfer still reads.  By Dreg
   MainForm.RadioSPI.Enabled := OnOff;
   MainForm.RadioI2C.Enabled := OnOff;
   MainForm.RadioMw.Enabled := OnOff;
 
   //The status register editor and the script editor are modeless, so they stay
-  //clickable while an operation runs, and the flash loops pump the message
-  //queue. A click on "Read SREG" in the middle of an 8 MB write opens the
-  //device, does its own traffic and closes it again underneath the write,
-  //which then fails every remaining page. With "reset on every operation"
+  //clickable while an operation runs. A click on the editor's Read in the
+  //middle of an 8 MB write opens the device, does its own traffic and closes
+  //it again underneath the write, which then fails. With
+  //"Reset device on every operation" or "Reconnect on every operation"
   //ticked it also drops the supply mid page program.  By Dreg
   if sregedit.sregeditForm <> nil then sregedit.sregeditForm.Enabled := OnOff;
   if ScriptEditForm <> nil then ScriptEditForm.Enabled := OnOff;
+  //Find IC stays on top and selecting a chip there sets the bus radios, the
+  //chip size and the page size, and re-enables Erase, all while the transfer
+  //still reads them.  By Dreg
+  if ChipSearchForm <> nil then ChipSearchForm.Enabled := OnOff;
 end;
+
+var
+  //True from LockControl to UnlockControl, while an operation uses the
+  //programmer. The window still processes messages then, so it can be closed:
+  //FormCloseQuery reads this.  By Dreg
+  ControlLocked: boolean = false;
 
 procedure LockControl;
 begin
+  ControlLocked := true;
   SetOperationMenusEnabled(false);
   MainForm.ButtonRead.Enabled := False;
   MainForm.ButtonWrite.Enabled := False;
@@ -2266,6 +2601,7 @@ end;
 
 procedure UnlockControl;
 begin
+  ControlLocked := false;
   SetOperationMenusEnabled(true);
   MainForm.MPHexEditorEx.Enabled := true;
   MainForm.GroupChipSettings.Enabled := true;
@@ -2309,17 +2645,31 @@ begin
     <> mrYes then Exit;
 
   if ButtonBlock.Enabled then
+  begin
     ButtonBlockClick(Sender);
+    //A cancel during Unprotect stops the command too: the erase below would
+    //clear it.  By Dreg
+    if ButtonCancel.Tag <> 0 then Exit;
+  end;
   if ButtonErase.Enabled then
     if ComboSPICMD.ItemIndex <> SPI_CMD_45 then  //Сами стирают страницу
+    begin
       ButtonEraseClick(Sender);
+      //The command stops after a cancel and after an erase that did not end
+      //well, as the same fault would meet the write. It goes on when an I2C
+      //EEPROM refused only some pages, so the write programs the pages the
+      //chip does not protect.  By Dreg
+      if not FEraseOK then Exit;
+    end;
 
   CheckTemp := MenuAutoCheck.Checked;
   MenuAutoCheck.Checked := True;
-
-  ButtonWriteClick(Sender);
-
-  MenuAutoCheck.Checked := CheckTemp;
+  //Verify is the user's again however the write ends.  By Dreg
+  try
+    ButtonWriteClick(Sender);
+  finally
+    MenuAutoCheck.Checked := CheckTemp;
+  end;
 end;
 
 procedure TMainForm.MenuArduinoCOMPortClick(Sender: TObject);
@@ -2339,12 +2689,10 @@ begin
 
   ports := TStringList.Create;
   try
-    //Only what is plugged in right now. A port that is not there cannot be
-    //opened, so listing it would just be one more thing to get wrong.
+    //Only the ports present right now: one that is not there cannot be opened.
     BPGetSerialPorts(ports);
     cur := Trim(Buzzpirat_COMPort);
 
-    //This runs off a timer, so do nothing at all unless something moved.
     sig := ports.CommaText + '|' + cur;
     if sig = FCOMPortMenuSig then Exit;
     FCOMPortMenuSig := sig;
@@ -2416,8 +2764,8 @@ end;
 
 procedure TMainForm.ComPortTimerTimer(Sender: TObject);
 begin
-  //Cheap: a registry read on Windows, and the menus are only rebuilt when the
-  //result differs from what is already on screen.
+  //Cheap: registry reads on Windows, and a menu is only rebuilt when what it
+  //shows would change.
   RefreshCOMPortMenu;
   RefreshBP5PortMenu;
 end;
@@ -2425,15 +2773,21 @@ end;
 procedure TMainForm.MenuBuzzpiratDisconnectClick(Sender: TObject);
 begin
   if BuzzpiratDev = nil then Exit;
-  BuzzpiratDev.Disconnect;
-  LogPrint('Buzzpirat: disconnected, device reset to its user terminal');
+  case BuzzpiratDev.Disconnect of
+    bpdReset:
+      LogPrint('Buzzpirat: disconnected, device reset to its user terminal');
+    bpdKeptBinmode:
+      LogPrint('Buzzpirat: disconnected. A Bus Pirate v5 or newer stays in its ' +
+               'legacy binary mode until it restarts');
+    bpdNoSession:
+      LogPrint('Buzzpirat: not connected');
+  end;
 end;
 
-//--- Bus Pirate v5+ -----------------------------------------------------------
+//Bus Pirate v5+
 //By Dreg
 //https://github.com/therealdreg/asprogrammer-dregmod
-//Port menu, bus scanner and device report for the BPIO2 back end in
-//buspirate5hw.pas.
+//The BusPirateV5+ menu, for the BPIO2 back end in buspirate5hw.pas.
 
 procedure TMainForm.RefreshBP5PortMenu;
 var
@@ -2448,20 +2802,22 @@ begin
 
   ports := TStringList.Create;
   try
-    //Every port the machine really has, exactly like the v3.x menu. The
-    //registry is only used to label them, so a machine where that lookup finds
-    //nothing still gets a complete, usable list.
-    //Only what is plugged in right now, same rule as the v3.x menu.
+    //Every serial port the system has right now, as in the v3.x menu.
+    //BP5EnumerateDevices only labels them, so a machine where that lookup finds
+    //nothing still gets a complete list.
     BP5GetSerialPorts(ports);
     devs := BP5EnumerateDevices;
 
     cur := Trim(BusPirate5_COMPort);
 
+    //The captions show the note, so another Bus Pirate on the same port
+    //numbers has to change the signature too.  By Dreg
     sig := cur + '|';
     for i := 0 to ports.Count - 1 do
     begin
-      BP5DescribePort(devs, ports[i], isData, isTerm);
-      sig := sig + ports[i] + ':' + IntToStr(Ord(isData)) + IntToStr(Ord(isTerm)) + ',';
+      note := BP5DescribePort(devs, ports[i], isData, isTerm);
+      sig := sig + ports[i] + ':' + IntToStr(Ord(isData)) + IntToStr(Ord(isTerm)) +
+             ':' + note + ',';
     end;
 
     if sig = FBP5PortMenuSig then Exit;
@@ -2470,10 +2826,7 @@ begin
     wanted := ports.Count;
     if wanted = 0 then wanted := 1;
 
-    //Never destroy an item from the timer. A submenu that is open while
-    //this fires is walking the very list being freed, and the surplus is
-    //at most a few entries, so hide it instead. Growing is safe: an item
-    //that appears is not one the menu is already pointing at.  By Dreg
+    //As in RefreshCOMPortMenu: surplus items are hidden, never freed.  By Dreg
     while MenuBP5COMPort.Count < wanted do
     begin
       item := TMenuItem.Create(Self);
@@ -2502,8 +2855,8 @@ begin
 
         item.Caption := ports[i];
         if note <> '' then item.Caption := item.Caption + '   (' + note + ')';
-        //The terminal interface answers nothing here, so say so rather than
-        //letting the user pick it and wonder why the handshake times out.
+        //The terminal interface gives no BPIO2 answer, so a handshake there
+        //only times out.
         if isTerm then item.Caption := item.Caption + STR_DM_NOT_THIS_ONE;
 
         item.Hint := ports[i];
@@ -2538,8 +2891,48 @@ end;
 procedure TMainForm.MenuBP5DisconnectClick(Sender: TObject);
 begin
   if BusPirate5Dev = nil then Exit;
-  BusPirate5Dev.Disconnect;
-  LogPrint('BusPirateV5+: disconnected, device left in HiZ with the supply off');
+  //A failed park has already logged why the target may still be powered.
+  case BusPirate5Dev.Disconnect of
+    bp5pkParked:
+      LogPrint('BusPirateV5+: disconnected, device left in HiZ with the supply off');
+    bp5pkFailed:
+      LogPrint('BusPirateV5+: disconnected');
+    bp5pkNoSession:
+      if BusPirate5Dev.SupplyMayBeOn then
+        LogPrint('BusPirateV5+: not connected. The last session ended with the target ' +
+                 'supply on, so the target may still be powered: unplug the Bus Pirate to be sure')
+      else
+        LogPrint('BusPirateV5+: not connected');
+  end;
+end;
+
+//Shows where each wire goes on the Bus Pirate's own screen, for the bus picked
+//in the window, with the supply and the pull-ups off.  By Dreg
+procedure TMainForm.MenuBP5LabelsClick(Sender: TObject);
+var
+  err, bus: string;
+  ok: boolean;
+begin
+  if BusPirate5Dev = nil then Exit;
+  if RadioMw.Checked then
+  begin
+    LogPrint('BusPirateV5+: Show pin labels works for SPI and I2C only: pick one of them in the window');
+    Exit;
+  end;
+  if RadioI2C.Checked then bus := 'I2C' else bus := 'SPI';
+
+  Screen.Cursor := crHourGlass;
+  try
+    ok := BusPirate5Dev.ShowPinLabels(err);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+
+  if ok then
+    LogPrint('BusPirateV5+: the screen of the Bus Pirate shows where each ' + bus + ' wire goes. ' +
+             'The supply and the pull-ups are off; the next operation sets them as the menu says')
+  else
+    LogPrint('BusPirateV5+: could not show the ' + bus + ' pin labels: ' + err);
 end;
 
 procedure TMainForm.MenuBP5InfoClick(Sender: TObject);
@@ -2561,7 +2954,8 @@ end;
 
 procedure TMainForm.MenuBP5HelpClick(Sender: TObject);
 begin
-  ExecuteProcess('cmd.exe', '/c start https://docs.buspirate.com/', []);
+  //By Dreg
+  ExecuteProcess('cmd.exe', '/c start https://docs.buspirate.com/docs/software/asprogrammer-dregmod/', []);
 end;
 
 procedure TMainForm.MenuBP5I2CScanClick(Sender: TObject);
@@ -2594,7 +2988,7 @@ begin
     for i := 0 to High(found) do
       lines.Add(BusPirate5Dev.I2CDeviceLine(found[i]));
     ShowI2CScanResult(found, Trim(BusPirate5_COMPort),
-                      BusPirate5Dev.I2CBusDescription, lines);
+                      BusPirate5Dev.I2CBusDescription, lines, I2C_EMPTY_HINTS_V5);
   finally
     lines.Free;
   end;
@@ -2630,7 +3024,7 @@ begin
     for i := 0 to High(found) do
       lines.Add(BuzzpiratDev.I2CDeviceLine(found[i]));
     ShowI2CScanResult(found, Trim(Buzzpirat_COMPort),
-                      BuzzpiratDev.I2CBusDescription, lines);
+                      BuzzpiratDev.I2CBusDescription, lines, I2C_EMPTY_HINTS_V3);
   finally
     lines.Free;
   end;
@@ -2641,17 +3035,22 @@ const
   CHUNK = 65536;
 var
   size, done, take, i: integer;
+  bound: int64;
   buf: array[0..CHUNK - 1] of byte;
 begin
   size := MPHexEditorEx.DataSize;
-  //Nothing loaded yet: fill what a Write would accept, so the result can go
-  //straight to the Write button - which is the whole point of the feature.
-  //That is the chip size minus the start address, exactly the bound
-  //ButtonWriteClick checks against.
+  //Nothing loaded yet: fill what a Write would accept, the chip size minus the
+  //start address (the bound ButtonWriteClick checks), so the result can go
+  //straight to the Write button.
   if size <= 0 then
   begin
-    size := StrToIntDef(ComboChipSize.Text, 0) - Hex2Dec('$' + StartAddressEdit.Text);
-    if size < 0 then size := 0;
+    if StartAddressFromUI < 0 then
+    begin
+      ShowMessage(STR_CHECK_SETTINGS);
+      Exit;
+    end;
+    bound := StrToInt64Def(ComboChipSize.Text, 0) - StartAddressFromUI;
+    if (bound > 0) and (bound <= High(integer)) then size := integer(bound) else size := 0;
   end;
   if size <= 0 then
   begin
@@ -2660,9 +3059,9 @@ begin
   end;
 
   if MessageDlg(STR_DM_FILL_TITLE,
-       Format('Replace the whole %d byte hexeditor content with random data?' + LineEnding +
-              LineEnding + 'The chip itself is not touched until you press Write.',
-              [size]), mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
+       Format(STR_DM_FILL_ASK, [size]) + LineEnding + LineEnding +
+       Format(STR_DM_FILL_UNTOUCHED, [ButtonWrite.Hint]),
+       mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
 
   Screen.Cursor := crHourGlass;
   try
@@ -2897,34 +3296,34 @@ begin
 
   if ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
-    //Only sreg was initialised, so a chip that does not implement the second
-    //and third status registers, or a read that failed, printed whatever was on
-    //the stack as if the chip had said it. UsbAsp25_ReadSR returns the byte
-    //count and nobody was looking at it.  By Dreg
+    //Every read is checked: the ReadSR functions return the byte count, and a
+    //failed read leaves a value the chip never sent (zero here, the opcode
+    //in the 95 and 45 functions).  By Dreg
     sreg2 := 0;
     sreg3 := 0;
-    if UsbAsp25_ReadSR(sreg) < 1 then
+    if (UsbAsp25_ReadSR(sreg) < 1) or (UsbAsp25_ReadSR(sreg2, $35) < 1) or
+       (UsbAsp25_ReadSR(sreg3, $15) < 1) then
       LogPrint(STR_DM_SREG_NO_ANSWER)
     else
-    begin
-      UsbAsp25_ReadSR(sreg2, $35);
-      UsbAsp25_ReadSR(sreg3, $15);
       LogPrint('Sreg: '+IntToBin(sreg, 8)+'(0x'+(IntToHex(sreg, 2)+'), ')
                                            +IntToBin(sreg2, 8)+'(0x'+(IntToHex(sreg2, 2)+'), ')
                                            +IntToBin(sreg3, 8)+'(0x'+(IntToHex(sreg3, 2)+')'));
-    end;
   end;
 
   if ComboSPICMD.ItemIndex = SPI_CMD_95 then
   begin
-    UsbAsp95_ReadSR(sreg); //Читаем регистр
-    LogPrint('Sreg: '+IntToBin(sreg, 8));
+    if UsbAsp95_ReadSR(sreg) < 1 then //Читаем регистр
+      LogPrint(STR_DM_SREG_NO_ANSWER)
+    else
+      LogPrint('Sreg: '+IntToBin(sreg, 8));
   end;
 
   if ComboSPICMD.ItemIndex = SPI_CMD_45 then
   begin
-    UsbAsp45_ReadSR(sreg); //Читаем регистр
-    LogPrint('Sreg: '+IntToBin(sreg, 8));
+    if UsbAsp45_ReadSR(sreg) < 1 then //Читаем регистр
+      LogPrint(STR_DM_SREG_NO_ANSWER)
+    else
+      LogPrint('Sreg: '+IntToBin(sreg, 8));
   end;
 
 finally
@@ -2979,8 +3378,6 @@ begin
 end;
 
 procedure TMainForm.RadioSPIChange(Sender: TObject);
-var
-  SkipFFLabel: string;
 begin
   Label1.Visible              := True;
   LabelSPICMD.Visible         := True;
@@ -2990,22 +3387,8 @@ begin
   ButtonErase.Enabled         := True;
   ButtonReadID.Enabled        := True;
 
-  if ComboSPICMD.ItemIndex = SPI_CMD_KB then
-  begin
-    ButtonBlock.Enabled := False;
-
-    //Built from a placeholder, not by deleting the last two characters of the
-     //caption. That only ever worked because every translation happened to end
-     //in the token; one that put it anywhere else, or spelled it 0xFF, had the
-     //wrong two characters cut off instead.  By Dreg
-    MenuSkipFF.Caption := Format(STR_DM_SKIP_TOKEN, ['00']);
-  end
-  else
-  begin
-    ButtonBlock.Enabled := True;
-
-    MenuSkipFF.Caption := Format(STR_DM_SKIP_TOKEN, ['FF'])
-  end;
+  ButtonBlock.Enabled := ComboSPICMD.ItemIndex <> SPI_CMD_KB;
+  UpdateSkipFFCaption;
 
   ComboMWBitLen.Visible       := False;
   Label4.Visible              := False;
@@ -3030,10 +3413,12 @@ var
 begin
 try
   ButtonCancel.Tag := 0;
-  if not OpenDevice() then exit;
+  //Ask before opening the device, as Erase does: on a Bus Pirate with Power ON
+  //ticked, opening switches the target supply on.  By Dreg
   if Sender <> ComboItem1 then
     if MessageDlg('AsProgrammer', STR_START_WRITE, mtConfirmation, [mbYes, mbNo], 0)
       <> mrYes then Exit;
+  if not OpenDevice() then exit;
   LockControl();
 
   if RunScriptFromFile(CurrentICParam.Script, 'write') then Exit;
@@ -3046,7 +3431,12 @@ try
     Exit;
   end;
 
-  if MPHexEditorEx.DataSize > StrToInt(ComboChipSize.Text) - Hex2Dec('$'+StartAddressEdit.Text) then
+  if StartAddressFromUI < 0 then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+  if MPHexEditorEx.DataSize > StrToInt64(ComboChipSize.Text) - StartAddressFromUI then
   begin
     LogPrint(STR_WRONG_FILE_SIZE);
     Exit;
@@ -3056,10 +3446,10 @@ try
   if RadioSPI.Checked then
   begin
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
-    //Remember it rather than discarding it. A protected chip takes an erase and
-    //a program without any complaint and keeps what it had, so the run used to
-    //end on "Done" having written nothing. Measured on an SST25VF080B, which
-    //powers up with every block protected.  By Dreg
+    //Kept for the warning at the end: a protected chip takes an erase and a
+    //program without any complaint and keeps what it had, so the run would end
+    //on "Done" having written nothing. Measured on an SST25VF080B, which powers
+    //up with every block protected.  By Dreg
     if ComboSPICMD.ItemIndex <> SPI_CMD_KB then
       WasProtected := IsLockBitsEnabled;
     if (not IsNumber(ComboPageSize.Text)) and (UpperCase(ComboPageSize.Text)<>'SSTB') and (UpperCase(ComboPageSize.Text)<>'SSTW') then
@@ -3141,11 +3531,9 @@ try
     MPHexEditorEx.SaveToStream(RomF);
     RomF.Position := 0;
 
-    PageSizeFromUI;   //clamps the box before every reader below uses it
-
-    WriteFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, PageSizeFromUI, I2C_DevAddr);
-
-    if MenuAutoCheck.Checked then
+    //No verify after a cancel or a chip that stayed busy.  By Dreg
+    if WriteFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), MPHexEditorEx.DataSize, PageSizeFromUI, I2C_DevAddr) and
+       MenuAutoCheck.Checked then
     begin
       if UsbAspI2C_BUSY(I2C_DevAddr) then
       begin
@@ -3172,7 +3560,14 @@ try
       Exit;
     end;
 
-    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+    begin
+      //Several programmers fail it without a word of their own, but the Bus
+      //Pirates log why.  By Dreg
+      if not AsProgrammer.Programmer.ErrorWasLogged then
+        LogPrint(STR_DM_MW_INIT_FAILED);
+      Exit;
+    end;
     TimeCounter := Time();
 
     RomF.Position := 0;
@@ -3215,6 +3610,7 @@ var
   I2C_ChunkSize: Word = 65535;
   i: Longword;
   BlankByte: byte;
+  blankSize: int64;
 begin
 try
   ButtonCancel.Tag := 0;
@@ -3231,7 +3627,12 @@ try
     Exit;
   end;
 
-  if (MPHexEditorEx.DataSize > StrToInt(ComboChipSize.Text) - Hex2Dec('$'+StartAddressEdit.Text)) and (not BlankCheck) then
+  if StartAddressFromUI < 0 then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+  if (MPHexEditorEx.DataSize > StrToInt64(ComboChipSize.Text) - StartAddressFromUI) and (not BlankCheck) then
   begin
     LogPrint(STR_WRONG_FILE_SIZE);
     Exit;
@@ -3251,7 +3652,18 @@ try
       else
         BlankByte := $FF;
 
-      for i:=1 to StrToInt(ComboChipSize.Text) do
+      //25 and 95 verify from the Start address, so the blank image runs from
+      //there to the end of the chip: a whole chip's worth would run past the
+      //end, and on a 16 MB part ask for four byte addressing.  By Dreg
+      blankSize := StrToInt64(ComboChipSize.Text);
+      if (ComboSPICMD.ItemIndex = SPI_CMD_25) or (ComboSPICMD.ItemIndex = SPI_CMD_95) then
+        blankSize := blankSize - StartAddressFromUI;
+      if blankSize <= 0 then
+      begin
+        LogPrint(STR_CHECK_SETTINGS);
+        Exit;
+      end;
+      while RomF.Size < blankSize do
         RomF.WriteByte(BlankByte);
     end
     else
@@ -3305,7 +3717,14 @@ try
     RomF.Clear;
     if BlankCheck then
     begin
-      for i:=1 to StrToInt(ComboChipSize.Text) do
+      //From the Start address to the end, as for SPI 25 and 95 above.  By Dreg
+      blankSize := StrToInt64(ComboChipSize.Text) - StartAddressFromUI;
+      if blankSize <= 0 then
+      begin
+        LogPrint(STR_CHECK_SETTINGS);
+        Exit;
+      end;
+      while RomF.Size < blankSize do
         RomF.WriteByte($FF);
     end
     else
@@ -3324,7 +3743,13 @@ try
       Exit;
     end;
 
-    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+    begin
+      //By Dreg
+      if not AsProgrammer.Programmer.ErrorWasLogged then
+        LogPrint(STR_DM_MW_INIT_FAILED);
+      Exit;
+    end;
     TimeCounter := Time();
 
     RomF.Clear;
@@ -3412,7 +3837,7 @@ try
     begin
       s := s + IntToHex(SLreg[i], 2);
     end;
-    LogPrint('Secktor Lockdown регистр: 0x'+s);
+    LogPrint('Sector Lockdown register: 0x'+s);
     if UsbAsp45_isPagePowerOfTwo() then LogPrint(STR_45PAGE_POWEROF2)
       else LogPrint(STR_45PAGE_STD);
 
@@ -3456,6 +3881,8 @@ begin
       UsbAspMulti_ReadReg($FF24, ID.IDABH); //read EDI version
       LogPrint('KB9012 EDI version: '+IntToHex(ID.IDABH, 2));
       ExitProgMode25;
+      //As the path below does: the finally only unlocks.  By Dreg
+      AsProgrammer.Programmer.DevClose;
       Exit;
     end;
 
@@ -3469,11 +3896,11 @@ begin
     IDstrABH := Upcase(IntToHex(ID.IDABH, 2));
     IDstr15H := Upcase(IntToHex(ID.ID15H[0], 2)+IntToHex(ID.ID15H[1], 2));
 
-    if FileExists('chiplist.xml') then
+    if FileExists(ChipListFileName) then
     begin
 
       try
-        ReadXMLFile(XMLfile, 'chiplist.xml');
+        ReadXMLFile(XMLfile, ChipListFileName);
       except
         on E: EXMLReadError do
         begin
@@ -3568,7 +3995,7 @@ begin
   ShowMonospaceReport('Buzzpirat / Bus Pirate', report);
 end;
 
-//The run time report windows have no form file, so their buttons share these
+//The run time report windows have no form file, so their controls share these
 //two handlers and find their partner controls through the parent chain.
 procedure TMainForm.ReportCopyClick(Sender: TObject);
 var
@@ -3621,7 +4048,7 @@ begin
     bar.Height := 44;
     bar.BevelOuter := bvNone;
 
-    //alRight stacks right to left in creation order, so Close ends up outermost.
+    //alRight stacks right to left in creation order: Close ends up outermost.
     btnClose := TButton.Create(dlg);
     btnClose.Parent := bar;
     btnClose.Caption := STR_DM_BTN_CLOSE;
@@ -3647,7 +4074,6 @@ begin
     memo.ScrollBars := ssAutoBoth;
     memo.WordWrap := false;
     memo.ParentFont := false;
-    //These reports are column aligned; a proportional font would ruin them.
     memo.Font.Name := 'Courier New';
     memo.Font.Size := 9;
     memo.Text := AText;
@@ -3678,7 +4104,7 @@ begin
 end;
 
 procedure TMainForm.ShowI2CScanResult(const Found: TBytes; const APort,
-  ABusDesc: string; ALines: TStrings);
+  ABusDesc: string; ALines: TStrings; const AEmptyHints: string);
 var
   dlg: TForm;
   memo: TMemo;
@@ -3695,12 +4121,7 @@ begin
   if Length(Found) = 0 then
     report := report +
       'Nothing answered.' + LineEnding + LineEnding +
-      'Worth checking:' + LineEnding +
-      '  - SDA on MOSI, SCL on CLK, and a ground shared with the target' + LineEnding +
-      '  - pull-ups: switch "Pull UPs ON" on, and remember the Bus Pirate' + LineEnding +
-      '    needs its Vpullup pin fed (tie it to 3V3 or 5V)' + LineEnding +
-      '  - target power: "Power ON" drives the 3V3 and 5V rails' + LineEnding +
-      '  - a slower clock (50 kHz or 5 kHz) for long or unterminated wires'
+      'Worth checking:' + LineEnding + AEmptyHints
   else
   begin
     report := report + Format(STR_DM_I2C_SCAN_COUNT, [Length(Found)]) + LineEnding;
@@ -3806,11 +4227,9 @@ begin
   ShowMessage(credits);
 end;
 
-//Runs a chip script. This is an operation like any other, so it has to behave
-//like one: every other button locks the interface while it works and releases
-//the device afterwards whatever happens. This one did neither, so a script left
-//the port held open, the target still powered, and the toolbar live enough to
-//start a second operation on top of the first.  By Dreg
+//Runs a chip script as an operation like any other: the interface is locked
+//while it works, so no second operation starts on top of it, and the device
+//is closed afterwards whatever happens.  By Dreg
 procedure TMainForm.SpeedButton1Click(Sender: TObject);
 begin
   if ComboBox_chip_scriptrun.Items.Capacity < 1 then Exit;
@@ -3819,6 +4238,7 @@ begin
     LockControl();
     RunScriptFromFile(CurrentICParam.Script, ComboBox_chip_scriptrun.Text);
   finally
+    ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
     UnlockControl();
   end;
@@ -3827,7 +4247,9 @@ end;
 procedure TMainForm.StartAddressEditChange(Sender: TObject);
 begin
   if StartAddressEdit.Text = '' then StartAddressEdit.Text := '0';
-  if Hex2Dec('$'+StartAddressEdit.Text) > 0 then
+  //StartAddressFromUI rather than Hex2Dec, which raises on pasted text that is
+  //not hex and is negative from 80000000 up.  By Dreg
+  if StartAddressFromUI > 0 then
      StartAddressEdit.Color:= clYellow
   else
      StartAddressEdit.Color:= clDefault;
@@ -3885,11 +4307,11 @@ end;
 
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
-  //Without this the "random" buffer would be the same bytes on every run,
-  //which is exactly what a write/read-back test must not be.
+  //Without this the random fill gives the same bytes on every run, and a write
+  //and read back test needs different ones each time.
   Randomize;
 
-  //So spi25 can break out of a busy wait without knowing about the GUI.
+  //Lets spi25 cancel a long busy wait.
   UsbAsp25_OnCancel := @UserCancel;
 
   AsProgrammer := TAsProgrammer.Create;
@@ -3904,13 +4326,15 @@ begin
   AsProgrammer.AddHW(TFT232HHardware.Create);
   AsProgrammer.AddHW(TCH347Hardware.Create);
 
-  //This fork is built around the Bus Pirate, so that is what a fresh install
-  //starts on. A settings.xml, if there is one, overrides it further down.
-  SelectHW(CHW_BUZZPIRAT);
+  //This fork is built around the Bus Pirate, so a new install starts on
+  //BusPirateV5+, the Bus Pirate v5 and newer over BPIO2. A settings.xml that
+  //names a programmer overrides it further down.  By Dreg
+  SelectHW(CHW_BUSPIRATE5);
 
   LoadChipList(ChipListFile);
   RomF := TMemoryStream.Create;
   ScriptEngine := TPasCalc.Create;
+  ScriptEngine.IncludeDir := ScriptsPath;  //By Dreg
   ScriptsFunc.SetScriptFunctions(ScriptEngine);
 
   MPHexEditorEx.NoSizeChange := true;
@@ -3935,7 +4359,10 @@ begin
   BusPirate5Dev := nil;
   MainForm.MPHexEditorEx.Free;
   RomF.Free;
-  SaveOptions(SettingsFile);
+  //Saved here when FormCloseQuery did not: an end that never asked it, an
+  //operation still running at the close, or a save that failed, tried again
+  //with nobody left to tell.  By Dreg
+  if not FSettingsSaved then SaveOptions(SettingsFile);
   ChipListFile.Free;
   SettingsFile.Free;
   ScriptEngine.Free;
@@ -3962,6 +4389,18 @@ try
     Exit;
   end;
 
+  //The Start address box has to hold a hex number below the chip size, as for
+  //Write. StartAddressFromUI gives -1 for text that is not hex, and RomF is
+  //cleared only after this check, so a refused address leaves the editor as
+  //it was.  By Dreg
+  if (StartAddressFromUI < 0) or
+     (StartAddressFromUI >= StrToInt64(ComboChipSize.Text)) then
+  begin
+    LogPrint(STR_CHECK_SETTINGS);
+    Exit;
+  end;
+  RomF.Clear;
+
   //SPI
   if RadioSPI.Checked then
   begin
@@ -3974,7 +4413,7 @@ try
     end;
 
     if  ComboSPICMD.ItemIndex = SPI_CMD_25 then
-      ReadFlash25(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text));
+      ReadFlash25(RomF, cardinal(StartAddressFromUI), StrToInt(ComboChipSize.Text));
     if  ComboSPICMD.ItemIndex = SPI_CMD_45 then
     begin
       if (not IsNumber(ComboPageSize.Text)) then
@@ -3986,7 +4425,7 @@ try
     end;
 
     if  ComboSPICMD.ItemIndex = SPI_CMD_95 then
-      ReadFlash95(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text));
+      ReadFlash95(RomF, cardinal(StartAddressFromUI), StrToInt(ComboChipSize.Text));
 
     RomF.Position := 0;
     MPHexEditorEx.LoadFromStream(RomF);
@@ -4014,7 +4453,7 @@ try
       exit;
     end;
     TimeCounter := Time();
-    ReadFlashI2C(RomF, Hex2Dec('$'+StartAddressEdit.Text), StrToInt(ComboChipSize.Text), I2C_ChunkSize, I2C_DevAddr);
+    ReadFlashI2C(RomF, cardinal(StartAddressFromUI), StrToInt(ComboChipSize.Text), I2C_ChunkSize, I2C_DevAddr);
 
     RomF.Position := 0;
     MPHexEditorEx.LoadFromStream(RomF);
@@ -4029,7 +4468,13 @@ try
       Exit;
     end;
 
-    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+    begin
+      //By Dreg
+      if not AsProgrammer.Programmer.ErrorWasLogged then
+        LogPrint(STR_DM_MW_INIT_FAILED);
+      Exit;
+    end;
     TimeCounter := Time();
     ReadFlashMW(RomF, StrToInt(ComboMWBitLen.Text), 0, StrToInt(ComboChipSize.Text));
 
@@ -4040,8 +4485,13 @@ try
 
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
 
-  CRC32 := UpdateCRC32($FFFFFFFF, Romf.Memory, Romf.Size);
-  LogPrint('CRC32 = 0x'+IntToHex(CRC32, 8));
+  //A read stopped before its first byte, as when EN4B could not be sent, has
+  //no image to sum.  By Dreg
+  if RomF.Size > 0 then
+  begin
+    CRC32 := UpdateCRC32($FFFFFFFF, Romf.Memory, Romf.Size);
+    LogPrint('CRC32 = 0x'+IntToHex(CRC32, 8));
+  end;
 
 finally
   ExitProgMode25;
@@ -4072,25 +4522,60 @@ begin
 end;
 
 procedure TMainForm.FormCloseQuery(Sender: TObject; var CanClose: boolean);
+var
+  err: string;
 begin
   ButtonCancel.Tag := 1;
   ScriptEditForm.FormCloseQuery(Sender, CanClose);
+  //Park the Bus Pirate v5+ now, while a dialog can still say that it failed:
+  //Destroy would do it later, with the log gone. An operation still running
+  //keeps the device, and Destroy parks it once the operation ends.  By Dreg
+  if CanClose and (BusPirate5Dev <> nil) and (not ControlLocked) then
+  begin
+    BusPirate5Dev.Disconnect;
+    if BusPirate5Dev.SupplyMayBeOn then
+      MessageDlg('BusPirateV5+', STR_DM_BP5_SUPPLY_LEFT_ON, mtWarning, [mbOK], 0);
+  end;
+  //The settings too, for the same reason: a dialog shown from Destroy does not
+  //appear and the program hangs, and without one a folder the user cannot
+  //write to loses them without a word. Not while an operation still runs: it
+  //may hold a setting of its own (the combined command ticks Verify), and
+  //Destroy saves them once it ends.  By Dreg
+  if CanClose and (not ControlLocked) then
+  begin
+    err := SaveOptions(SettingsFile);
+    FSettingsSaved := err = '';
+    if err <> '' then
+      MessageDlg('AsProgrammer', Format(STR_DM_SETTINGS_NOT_SAVED, [err]), mtWarning, [mbOK], 0);
+  end;
 end;
 
 procedure TMainForm.ButtonEraseClick(Sender: TObject);
 var
   I2C_DevAddr: byte;
   WasProtected: boolean = false;
+  erased: boolean = false;
+  partly: boolean = false;
 begin
 try
   ButtonCancel.Tag := 0;
-  if not OpenDevice() then exit;
+  FEraseOK := false;
+  //Ask before opening the device: opening configures the programmer, and a
+  //Bus Pirate with Power ON ticked switches the target supply on. The finally
+  //copes with a device never opened, as when OpenDevice fails.  By Dreg
   if Sender <> ComboItem1 then
     if MessageDlg('AsProgrammer', STR_START_ERASE, mtConfirmation, [mbYes, mbNo], 0)
       <> mrYes then Exit;
+  if not OpenDevice() then exit;
   LockControl();
 
-  if RunScriptFromFile(CurrentICParam.Script, 'erase') then Exit;
+  //A chip's own erase script reports for itself: the combined command goes on
+  //after it unless it stopped on an error or a cancel.  By Dreg
+  if RunScriptFromFile(CurrentICParam.Script, 'erase') then
+  begin
+    FEraseOK := (ScriptEngine.ErrCode = 0) and (ButtonCancel.Tag = 0);
+    Exit;
+  end;
 
   LogPrint(TimeToStr(Time()));
 
@@ -4119,13 +4604,21 @@ try
         Exit;
       end;
 
-      EraseFlashKB(StrToInt(ComboChipSize.Text), PageSizeFromUI);
+      if not EraseFlashKB(StrToInt(ComboChipSize.Text), PageSizeFromUI) then Exit;
+      LogPrint(STR_DONE);
+      erased := true;
     end;
 
     if ComboSPICMD.ItemIndex = SPI_CMD_25 then
     begin
-      UsbAsp25_WREN();
-      UsbAsp25_ChipErase();
+      //A programmer that refuses writes still reads, so without this the busy
+      //wait below would pass and log Done.  By Dreg
+      if (UsbAsp25_WREN() < 1) or (UsbAsp25_ChipErase() < 1) then
+      begin
+        if not AsProgrammer.Programmer.ErrorWasLogged then
+          LogPrint(STR_DM_ERASE_NOT_SENT);
+        Exit;
+      end;
 
       ProgressBar.Style:= pbstMarquee;
       ProgressBar.Max:= 1;
@@ -4137,6 +4630,8 @@ try
 
       ProgressBar.Style:= pbstNormal;
       ProgressBar.Position:= 0;
+      LogPrint(STR_DONE);
+      erased := true;
     end;
 
     if ComboSPICMD.ItemIndex = SPI_CMD_95 then
@@ -4147,18 +4642,26 @@ try
           Exit;
         end;
 
-      EraseEEPROM25(0, StrToInt(ComboChipSize.Text), PageSizeFromUI, StrToInt(ComboChipSize.Text));
+      erased := EraseEEPROM25(0, StrToInt(ComboChipSize.Text), PageSizeFromUI, StrToInt(ComboChipSize.Text));
     end;
 
     if ComboSPICMD.ItemIndex = SPI_CMD_45 then
     begin
-      UsbAsp45_ChipErase();
+      //As for the 25 series.  By Dreg
+      if UsbAsp45_ChipErase() < 1 then
+      begin
+        if not AsProgrammer.Programmer.ErrorWasLogged then
+          LogPrint(STR_DM_ERASE_NOT_SENT);
+        Exit;
+      end;
 
       while UsbAsp45_Busy() do
       begin
         Application.ProcessMessages;
         if UserCancel then Exit;
       end;
+      LogPrint(STR_DONE);
+      erased := true;
     end;
 
   end;
@@ -4185,7 +4688,7 @@ try
 
     TimeCounter := Time();
 
-    EraseFlashI2C(0, StrToInt(ComboChipSize.Text), PageSizeFromUI, I2C_DevAddr);
+    erased := EraseFlashI2C(0, StrToInt(ComboChipSize.Text), PageSizeFromUI, I2C_DevAddr, partly);
   end;
 
   //Microwire
@@ -4197,23 +4700,42 @@ try
       Exit;
     end;
 
-    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then Exit;
+    if not AsProgrammer.Programmer.MWInit(SetSPISpeed(0)) then
+    begin
+      //By Dreg
+      if not AsProgrammer.Programmer.ErrorWasLogged then
+        LogPrint(STR_DM_MW_INIT_FAILED);
+      Exit;
+    end;
     TimeCounter := Time();
     LogPrint(STR_ERASING_FLASH);
-    UsbAspMW_Ewen(StrToInt(ComboMWBitLen.Text));
-    UsbAspMW_ChipErase(StrToInt(ComboMWBitLen.Text));
+    //As for the 25 series: the busy reads of the UsbAsp, Arduino and AVRISP
+    //report a chip that is not busy when they fail, so Done needs both
+    //commands sent.  By Dreg
+    if (UsbAspMW_Ewen(StrToInt(ComboMWBitLen.Text)) < 1) or
+       (UsbAspMW_ChipErase(StrToInt(ComboMWBitLen.Text)) < 1) then
+    begin
+      if not AsProgrammer.Programmer.ErrorWasLogged then
+        LogPrint(STR_DM_ERASE_NOT_SENT);
+      Exit;
+    end;
 
      while UsbAspMW_Busy do
      begin
        Application.ProcessMessages;
        if UserCancel then Exit;
      end;
+     LogPrint(STR_DONE);
+     erased := true;
 
   end;
 
-
-  LogPrint(STR_DONE);
+  //Each branch logs Done once its erase has ended well: the SPI 95 and I2C
+  //routines log their own result, the other branches log it above.  By Dreg
   LogPrint(STR_TIME + TimeToStr(Time() - TimeCounter));
+  //A cancel seen after the last page still stops the combined command.
+  //By Dreg
+  FEraseOK := (erased or partly) and (ButtonCancel.Tag = 0);
 
   //Last thing the reader sees, not buried among the settings at the top.
   if WasProtected then LogPrint(STR_DM_MAYBE_PROTECTED);
@@ -4230,10 +4752,11 @@ begin
   VerifyFlash(true);
 end;
 
-procedure SaveOptions(XMLfile: TXMLDocument);
+function SaveOptions(XMLfile: TXMLDocument): string;
 var
   Node, ParentNode: TDOMNode;
 begin
+  result := '';
   if XMLfile <> nil then
   begin
     //Удаляем старую запись
@@ -4415,7 +4938,13 @@ begin
 
     Node.Appendchild(parentNode);
 
-    WriteXMLFile(XMLfile, SettingsFileName);
+    //The program's folder can be one the user cannot write to, as under
+    //Program Files.  By Dreg
+    try
+      WriteXMLFile(XMLfile, SettingsFileName);
+    except
+      on E: Exception do result := E.Message;
+    end;
   end;
 
 end;

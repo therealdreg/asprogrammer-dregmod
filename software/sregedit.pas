@@ -167,15 +167,17 @@ var sreg1, sreg2, sreg3: byte;
 begin
   if MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
+  //Lock the main window as every operation does: the write below pumps the
+  //message queue while it waits for the chip, and a toolbar click during that
+  //wait would start a second operation on top.  By Dreg
+  LockControl;
   try
     if not OpenDevice() then exit;
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
 
-    //All three start at zero. They are ordinary locals, so on a chip that is
-    //neither Macronix nor Winbond/GigaDevice the second and third were never
-    //written at all and whatever was on the stack got painted into the
-    //checkboxes as the chip's status. A failed read did the same, because
-    //UsbAsp25_ReadSR returns the byte count and nobody looked at it.  By Dreg
+    //All three start at zero: they are locals, and the Macronix type never
+    //reads the third register. Any failed read logs STR_DM_SREG_NO_ANSWER and
+    //exits before the checkboxes are set.  By Dreg
     sreg1 := 0;
     sreg2 := 0;
     sreg3 := 0;
@@ -187,13 +189,18 @@ begin
     end;
 
     if SREGType = ST_MACRONIX then
-      UsbAsp25_ReadSR(sreg2, $15);
+      if UsbAsp25_ReadSR(sreg2, $15) < 1 then
+      begin
+        LogPrint(STR_DM_SREG_NO_ANSWER);
+        Exit;
+      end;
 
     if (SREGType = ST_WINBOND) or (SREGType = ST_GIGADEVICE) then
-    begin
-      UsbAsp25_ReadSR(sreg2, $35);
-      UsbAsp25_ReadSR(sreg3, $15);
-    end;
+      if (UsbAsp25_ReadSR(sreg2, $35) < 1) or (UsbAsp25_ReadSR(sreg3, $15) < 1) then
+      begin
+        LogPrint(STR_DM_SREG_NO_ANSWER);
+        Exit;
+      end;
 
     SetSreg1CheckBox(sreg1);
     SetSreg2CheckBox(sreg2);
@@ -202,6 +209,7 @@ begin
   finally
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
+    UnlockControl;
   end;
   end;
 end;
@@ -210,6 +218,7 @@ procedure TsregeditForm.ButtonWriteSregClick(Sender: TObject);
 begin
   if MainForm.ComboSPICMD.ItemIndex = SPI_CMD_25 then
   begin
+  LockControl;
   try
     if not OpenDevice() then exit;
     EnterProgMode25(SetSPISpeed(0), MainForm.MenuSendAB.Checked);
@@ -243,6 +252,7 @@ begin
   finally
     ExitProgMode25;
     AsProgrammer.Programmer.DevClose;
+    UnlockControl;
   end;
   end;
 end;

@@ -211,6 +211,7 @@ var
 begin
   if not FDevOpened then Exit(-1);
 
+  Result := 0;
   StopAfterWrite := 1;
 
   if WBufferLen > 0 then

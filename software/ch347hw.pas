@@ -253,7 +253,7 @@ begin
   if not FDevOpened then Exit;
 
   mBuffer[0] := mCH341A_CMD_I2C_STREAM;
-  mBuffer[1] := mCH341A_CMD_I2C_STM_OUT or 1;
+  mBuffer[1] := mCH341A_CMD_I2C_STM_OUT;
   mBuffer[2] := data;
   mBuffer[3] := mCH341A_CMD_I2C_STM_END;
   mLength := 4;
@@ -365,8 +365,15 @@ begin
     end;
 
     //Отсылаем биты
+    //BitsWrite only when every bit went out: the Microwire erase checks it,
+    //and the Microwire write adds it up.  By Dreg
+    result := BitsWrite;
     for i:=0 to BitsWrite-1 do
-      if WriteBit(bit_buffer[i]) then result := BitsWrite else result := -1;
+      if not WriteBit(bit_buffer[i]) then
+      begin
+        result := -1;
+        Break;
+      end;
 
     if Boolean(CS) then CH347GPIO_Set(FDevHandle, %00000100, $FF, 0);
   end;

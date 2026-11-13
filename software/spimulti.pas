@@ -117,9 +117,12 @@ end;
 
 function UsbAspMulti_ErasePage(Addr: longword): integer;
 begin
-   UsbAspMulti_WriteReg($FEAA, lo(hi(Addr)) );
-   UsbAspMulti_WriteReg($FEA9, hi(lo(Addr)) );
-   UsbAspMulti_WriteReg($FEA8, lo(lo(Addr)) );
+   //Each address byte checked: a byte that did not go out keeps its old
+   //value, and the erase can hit another page.  By Dreg
+   result := -1;
+   if UsbAspMulti_WriteReg($FEAA, lo(hi(Addr)) ) < 1 then Exit;
+   if UsbAspMulti_WriteReg($FEA9, hi(lo(Addr)) ) < 1 then Exit;
+   if UsbAspMulti_WriteReg($FEA8, lo(lo(Addr)) ) < 1 then Exit;
 
    result := UsbAspMulti_WriteReg($FEAC, $20);
 end;

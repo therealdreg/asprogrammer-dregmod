@@ -558,9 +558,14 @@ end;
 function TFT232HHardware.MWWrite(CS: byte; BitsWrite: byte; buffer: array of byte): integer;
 var
   i, BuffIndex: integer;
+  sent: boolean;
 begin
   if not FDevOpened then Exit(-1);
 
+  //BitsWrite once everything went out, as the other programmers return it:
+  //the Microwire erase checks it, and the Microwire write adds it up.  By Dreg
+  result := 0;
+  sent := true;
   if BitsWrite > 0 then
   begin
     SetSPIcs(1); //cs hi
@@ -580,18 +585,20 @@ begin
          Inc(BuffIndex);
       end;
 
-      Write_USB_Device_Buffer((BitsWrite div 8)+3);
+      sent := Write_USB_Device_Buffer((BitsWrite div 8)+3) = (BitsWrite div 8)+3;
     end;
 
     if (BitsWrite mod 8) > 0 then //bits
     begin
       FT_Out_Buffer[0] := $13; //write bit
       FT_Out_Buffer[1] := (BitsWrite mod 8)-1;
-      FT_Out_Buffer[2] := buffer[i+1];
+      //The bits after the whole bytes.  By Dreg
+      FT_Out_Buffer[2] := buffer[BitsWrite div 8];
       FT_Out_Buffer[3] := $87; //Send answer back immediate command
-      Write_USB_Device_Buffer(4);
+      sent := (Write_USB_Device_Buffer(4) = 4) and sent;
     end;
 
+    if sent then result := BitsWrite else result := -1;
   end;
 
     if Boolean(CS) then SetSPIcs(0);

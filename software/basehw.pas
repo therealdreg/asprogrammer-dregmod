@@ -22,6 +22,10 @@ public
   property HardwareName: string read FHardwareName write FHardwareName;
 
   function GetLastError: string; virtual; abstract;
+  //True when the back end already logged what GetLastError returns, so the
+  //caller does not log it twice. The two Bus Pirate drivers log their errors
+  //where they happen.  By Dreg
+  function ErrorWasLogged: boolean; virtual;
   function DevOpen: boolean; virtual; abstract;
   procedure DevClose; virtual; abstract;
 
@@ -71,6 +75,11 @@ public
 end;
 
 implementation
+
+function TBaseHardware.ErrorWasLogged: boolean;
+begin
+  result := false;
+end;
 
 constructor TAsProgrammer.Create;
 begin

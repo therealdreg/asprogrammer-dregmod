@@ -82,10 +82,7 @@ begin
            begin
              cs := UTF16ToUTF8(ChipNode.NodeName); //Чип
              if pos(Upcase(chipname), Upcase(cs)) > 0 then
-             begin
                ChipSearchForm.ListBoxChips.Items.Append(cs+' ('+ UTF16ToUTF8(Item[j].NodeName) +')');
-               LogPrint(cs+' ('+ UTF16ToUTF8(Item[j].NodeName) +')');
-             end;
            end;
 
          end;
@@ -103,6 +100,7 @@ var
   Node, ChipNode: TDOMNode;
   j, i: integer;
   cs: string;
+  Sections: TStrings;
 begin
   if XMLfile <> nil then
   begin
@@ -189,7 +187,14 @@ begin
                if ChipNode.Attributes.GetNamedItem('script') <> nil then
                begin
                  Main.CurrentICParam.Script:= UTF16ToUTF8(ChipNode.Attributes.GetNamedItem('script').NodeValue);
-                 MainForm.ComboBox_chip_scriptrun.Items := scriptsfunc.GetScriptSectionsFromFile(Main.CurrentICParam.Script);
+                 //Items copies the list (Assign), so the one returned is freed
+                 //here.  By Dreg
+                 Sections := scriptsfunc.GetScriptSectionsFromFile(Main.CurrentICParam.Script);
+                 try
+                   MainForm.ComboBox_chip_scriptrun.Items := Sections;
+                 finally
+                   Sections.Free;
+                 end;
                  MainForm.ComboBox_chip_scriptrun.ItemIndex := 0;
                end
                else
